@@ -10,6 +10,7 @@ STT 한 줄 형식:  `<HH:MM:SS> 화자ID: 발화내용`
 """
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
@@ -21,19 +22,36 @@ from src import config
 _LINE_RE = re.compile(r"^<(\d{2}):(\d{2}):(\d{2})>\s+([0-9a-fA-F]+):\s?(.*)$")
 _FNAME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_(.+)\.txt$")
 
+logger: logging.Logger = logging.getLogger(__name__)
+
 
 def to_24h(hour: int) -> int:
     """STT 타임스탬프는 12시간제(AM/PM 미표기)다.
 
     실제 강의는 09:00~18:00 이므로:
       - 09,10,11,12시 → 오전/정오 그대로
-      - 01~05시       → 오후(13~17시)로 보정 (+12)
+      - 01~06시       → 오후(13~18시)로 보정 (+12)
     """
     return hour + 12 if 1 <= hour <= 6 else hour
 
 
 def _session_from_hour24(hour24: int) -> str:
     return "오전" if hour24 < config.SESSION_SPLIT_HOUR else "오후"
+
+
+def parse_line(line: str) -> tuple[int, int, int, str, str] | None:
+    """STT 한 줄을 (시, 분, 초, 화자ID, 발화)로 분해한다.
+
+    파싱(parse)·EDA(loader) 양쪽이 공유하는 단일 라인 파서.
+    정형에서 벗어나면 None 을 반환한다.
+    """
+    m = _LINE_RE.match(line)
+    if not m:
+        return None
+    return (
+        int(m.group(1)), int(m.group(2)), int(m.group(3)),
+        m.group(4), m.group(5).strip(),
+    )
 
 
 def parse_script_file(path: Path) -> pd.DataFrame:
@@ -49,8 +67,8 @@ def parse_script_file(path: Path) -> pd.DataFrame:
             line = raw.rstrip("\n")
             if not line.strip():
                 continue
-            lm = _LINE_RE.match(line)
-            if not lm:
+            parsed = parse_line(line)
+            if parsed is None:
                 # 정형에서 벗어난 줄은 버리지 않고 기록 → EDA에서 품질 점검
                 rows.append(
                     dict(date=date, course_id=course_id, lineno=lineno,
@@ -58,10 +76,7 @@ def parse_script_file(path: Path) -> pd.DataFrame:
                          session=None, speaker=None, text=line, malformed=True)
                 )
                 continue
-            hh, mm, ss, speaker, text = (
-                int(lm.group(1)), int(lm.group(2)), int(lm.group(3)),
-                lm.group(4), lm.group(5).strip(),
-            )
+            hh, mm, ss, speaker, text = parsed
             hour24 = to_24h(hh)
             rows.append(dict(
                 date=date, course_id=course_id, lineno=lineno,
@@ -82,9 +97,11 @@ def load_utterances(script_dir: Path | None = None) -> pd.DataFrame:
             f"강의 스크립트를 찾을 수 없음: {script_dir}\n"
             "→ 제공 데이터는 git에 포함되지 않습니다. 로컬에 원본을 배치하세요."
         )
+    logger.debug("STT 파일 %d개 적재 시작 (%s)", len(files), script_dir)
     df = pd.concat([parse_script_file(p) for p in files], ignore_index=True)
     df["char_len"] = df["text"].str.len()
     df["date"] = pd.to_datetime(df["date"])
+    logger.debug("load_utterances 완료: %d건 (%d파일)", len(df), len(files))
     return df
 
 
@@ -95,9 +112,16 @@ def load_metadata(csv_path: Path | None = None) -> pd.DataFrame:
     df = pd.read_csv(csv_path, encoding="utf-8-sig")
     df.columns = [c.strip() for c in df.columns]
     df["date"] = pd.to_datetime(df["date"])
-    # 'time' = "09:00 ~ 12:00" → 시작 시각으로 세션 판정 (메타는 24시간제)
-    start_hour = df["time"].str.extract(r"^(\d{2}):").astype(int)[0]
-    df["session"] = start_hour.apply(_session_from_hour24)
+    # 'time' = "09:00 ~ 12:00" → 시작 시각으로 세션 판정 (메타는 24시간제).
+    # 한 자리 시/빈 셀/형식 이탈도 죽지 않도록 NaN 으로 강제 후 분기한다.
+    extracted = df["time"].str.extract(r"^(\d{1,2}):")[0]
+    start_hour = pd.to_numeric(extracted, errors="coerce")
+    n_bad = int(start_hour.isna().sum())
+    if n_bad:
+        logger.warning("메타 time 파싱 실패 %d행 — 세션 미지정(None) 처리", n_bad)
+    df["session"] = start_hour.apply(
+        lambda h: _session_from_hour24(int(h)) if pd.notna(h) else None
+    )
     return df
 
 
@@ -109,4 +133,5 @@ def build_dataset(
     meta = load_metadata(csv_path)
     meta_cols = ["date", "session", "subject", "content", "instructor", "sub_instructor"]
     merged = utt.merge(meta[meta_cols], on=["date", "session"], how="left")
+    logger.debug("build_dataset 완료: %d건", len(merged))
     return merged
