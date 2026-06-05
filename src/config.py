@@ -1,0 +1,96 @@
+"""프로젝트 공통 설정: 데이터 경로, 상수, JVM(KoNLPy) 경로 해석.
+
+모든 모듈은 여기서 경로/상수를 가져다 쓴다. 실제 강의 데이터는 git에 포함되지
+않으므로(.gitignore), 로컬 `AI_Lecture_Analysis_Report_Generator/` 폴더에 원본을
+배치한 뒤 실행한다.
+"""
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+# ── 경로 ───────────────────────────────────────────────────────────────
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_ROOT = PROJECT_ROOT / "AI_Lecture_Analysis_Report_Generator"
+SCRIPT_DIR = DATA_ROOT / "강의 스크립트"
+METADATA_CSV = DATA_ROOT / "강의 메타데이터.csv"
+
+OUTPUT_DIR = PROJECT_ROOT / "outputs"
+EDA_DIR = OUTPUT_DIR / "eda"
+FIG_DIR = EDA_DIR / "figures"
+
+# 전처리 파이프라인 산출물(JSONL 등) — 원본 텍스트 파생물이므로 git 미포함
+PROCESSED_DIR = OUTPUT_DIR / "processed"
+
+# ── 발화 병합(Step 2) 파라미터 ─────────────────────────────────────────
+# 같은 화자 연속 발화를 하나의 블록으로 합칠 때의 시간 간격 임계값(초).
+# 데이터 측정: 동일화자 연속 gap 중앙값 10s, 81%가 ≤15s, 30s 초과는 2%(주제전환 추정).
+# → 2~3s(원안)는 과분할이라 20s로 상향. 폭주 방지용 블록 상한도 둠.
+MERGE_GAP_SEC = 20.0
+MERGE_MAX_BLOCK_SEC = 150.0
+MERGE_MAX_BLOCK_CHARS = 2000
+
+# ── 정제/모델(Step 3~5, Colab) 파라미터 ────────────────────────────────
+MODEL_ID = "upstage/SOLAR-10.7B-Instruct-v1.0"
+# 재현성: 모델 가중치 revision 을 커밋 해시로 고정 권장(HF 페이지에서 확인 후 입력).
+# None 이면 main 최신 — 팀 재현성을 위해 실제 운영 시 반드시 핀할 것.
+MODEL_REVISION = None
+# 결정적 생성(재현성): 그리디 디코딩 + 시드 고정.
+GEN_MAX_NEW_TOKENS = 1024
+GEN_DO_SAMPLE = False
+SEED = 42
+
+# Step 4 정제: 인접 블록을 묶는 섹션 최대 글자 수(맥락 보존 단위).
+# Solar 4k 컨텍스트 + 용어집/이전요약/출력 여유를 고려해 보수적으로.
+SECTION_MAX_CHARS = 2500
+# 슬라이딩 윈도우: 다음 섹션에 넘길 직전 섹션 요약 최대 글자.
+CONTEXT_SUMMARY_MAX_CHARS = 400
+
+# ── 도메인 상수 ────────────────────────────────────────────────────────
+# 오전/오후 세션 경계 (메타데이터: 오전 09:00~12:00, 오후 13:00~18:00)
+SESSION_SPLIT_HOUR = 13
+
+# 언어 표현 품질(체크리스트 카테고리 1)과 직접 연결되는 군더더기/필러 표현.
+# STT 특성상 구어체 간투사가 많아, '불필요한 반복 표현' 분석의 1차 신호로 사용.
+FILLER_WORDS = [
+    "음", "어", "아", "자", "이제", "그래서", "그러면", "그러니까", "근데",
+    "그냥", "막", "뭐", "이렇게", "저렇게", "약간", "좀", "인제", "요",
+    "네", "예", "거든요", "있잖아요",
+]
+
+# 한국어 분석 시 제거할 1차 불용어(빈도 분석 노이즈 제거용). 필요 시 확장.
+# Okt가 명사로 오분류하는 부사/대명사/수량 표현을 포함해 도메인 키워드를 부각.
+STOPWORDS = set(FILLER_WORDS) | {
+    "것", "수", "때", "거", "게", "걸", "또", "더", "등", "및", "은", "는",
+    "이", "가", "을", "를", "에", "의", "도", "로", "와", "과", "한", "수가",
+    "안", "이런", "그런", "저런", "여기", "거기", "저기", "우리", "저희", "여러분",
+    # 내용어가 아닌 빈출 명사(부사·수량·지시 표현)
+    "지금", "다음", "가지", "하나", "살짝", "한번", "현재", "부분", "경우",
+    "정도", "얘기", "생각", "자기", "느낌", "처음", "마지막", "사람", "그것",
+    "이것", "저것", "가요", "여기서", "이거", "저거", "그거", "전부", "이번",
+}
+
+
+def resolve_jvm_path() -> str | None:
+    """KoNLPy(JPype)용 libjvm 경로를 안정적으로 해석한다.
+
+    JPype 1.7 + 최신 JDK 조합에서 konlpy 내부 기본 경로 탐지가 bytes를 반환해
+    터지는 알려진 버그가 있어, 명시적 str 경로를 만들어 넘긴다.
+    `Okt(jvmpath=resolve_jvm_path())` 형태로 사용.
+    반환값이 None이면 KoNLPy 기본 동작에 맡긴다.
+    """
+    java_home = os.environ.get("JAVA_HOME")
+    if not java_home:
+        try:
+            java_home = subprocess.check_output(
+                ["/usr/libexec/java_home"], text=True
+            ).strip()
+        except Exception:
+            return None
+    candidate = Path(java_home) / "lib" / "server" / "libjvm.dylib"
+    return str(candidate) if candidate.exists() else None
+
+
+def ensure_output_dirs() -> None:
+    FIG_DIR.mkdir(parents=True, exist_ok=True)

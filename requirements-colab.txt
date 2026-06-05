@@ -1,0 +1,8 @@
+# Colab(A100) 전용 — Step 3~5 모델 추론(Solar-10.7B). GPU 필요.
+# Colab 노트북 첫 셀에서 설치. torch는 Colab 기본 제공본을 그대로 쓰는 걸 권장
+# (런타임 CUDA와 어긋나면 재설치 깨짐). 아래는 추론에 필요한 추가분.
+transformers==4.46.3
+accelerate==1.1.1
+sentencepiece==0.2.0
+# 메모리 빠듯할 때만 (A100 40GB는 fp16로 충분, 보통 불필요)
+# bitsandbytes==0.44.1

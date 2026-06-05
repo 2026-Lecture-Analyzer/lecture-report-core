@@ -1,0 +1,81 @@
+"""Step 3~5 프롬프트 템플릿.
+
+각 함수는 chat 메시지 리스트([{role, content}, ...])를 반환한다.
+모델 호출부(model.generate_fn)가 tokenizer.apply_chat_template 로 포맷한다.
+모든 프롬프트는 **JSON 출력**을 요구해 후처리를 결정적으로 만든다.
+
+담당: P1 (정제 고도화) — 이 파일은 비우지 않음(refine 파이프라인이 의존).
+아래 프롬프트는 동작하는 베이스라인. P1 과제 = 이 프롬프트들의 품질 튜닝.
+스키마(입출력 JSON)는 docs/SCHEMA.md 와 일치 유지할 것.
+"""
+from __future__ import annotations
+
+import json
+
+# TODO(P1): glossary_prompt — STT 오류·용어 추출 정확도 개선
+# TODO(P1): refine_prompt — 군더더기 제거 품질↑, 의미 보존(추가/왜곡 금지) 가드 강화
+# TODO(P1): chunk_prompt — 주제 경계 분할 품질↑ (또는 임베딩 기반 대체 검토)
+
+# ── Step 3: 용어집 후보 추출 ───────────────────────────────────────────
+_GLOSSARY_SYS = (
+    "너는 한국어 IT 강의 STT(음성인식) 전사본을 교정하는 도우미다. "
+    "전사본에는 음성인식 오류로 잘못 적힌 기술 용어가 많다. "
+    "주어진 텍스트에서 (1) 잘못 표기된 기술용어와 올바른 표준 표기 쌍, "
+    "(2) 자주 등장하는 핵심 도메인 용어를 찾아라."
+)
+
+
+def glossary_prompt(text: str) -> list[dict]:
+    user = (
+        "다음 강의 전사본 일부에서 STT 오류 후보와 핵심 용어를 추출해 "
+        "아래 JSON 형식으로만 답하라. 확실하지 않으면 포함하지 마라.\n"
+        '{"corrections": [{"wrong": "잡바", "correct": "Java"}], '
+        '"terms": ["인덱스", "트랜잭션"]}\n\n'
+        f"---\n{text}\n---"
+    )
+    return [{"role": "system", "content": _GLOSSARY_SYS},
+            {"role": "user", "content": user}]
+
+
+# ── Step 4: 섹션 정제 ──────────────────────────────────────────────────
+_REFINE_SYS = (
+    "너는 한국어 IT 강의 전사본을 읽기 좋은 문어체로 정제하는 편집자다. "
+    "원칙: (1) 의미·내용·예시는 절대 바꾸거나 추가하지 않는다. "
+    "(2) 군더더기/구어 간투사(이제, 저희가, 그다음에, 막, 뭐, 자, 어, 음 등)를 제거한다. "
+    "(3) 끊긴 발화를 자연스러운 문장으로 잇는다. "
+    "(4) 용어집에 따라 STT 오류 용어를 표준 표기로 고친다. "
+    "(5) [학생] 발화는 질문/답변 맥락이 중요하면 간결히 유지한다."
+)
+
+
+def refine_prompt(section_text: str, glossary: dict, prev_summary: str) -> list[dict]:
+    gloss_str = json.dumps(glossary, ensure_ascii=False)
+    ctx = prev_summary.strip() or "(없음 — 강의 시작 부분)"
+    user = (
+        f"[용어집(JSON)]\n{gloss_str}\n\n"
+        f"[직전 맥락 요약]\n{ctx}\n\n"
+        f"[정제할 섹션 원문]\n{section_text}\n\n"
+        "위 섹션을 정제하고, 다음 섹션에 넘길 1~2문장 요약을 작성해 "
+        "아래 JSON 형식으로만 답하라.\n"
+        '{"clean_text": "정제된 문어체 본문", "summary": "다음 맥락용 한두 문장 요약"}'
+    )
+    return [{"role": "system", "content": _REFINE_SYS},
+            {"role": "user", "content": user}]
+
+
+# ── Step 5: 주제 단위 청킹 ─────────────────────────────────────────────
+_CHUNK_SYS = (
+    "너는 정제된 한국어 강의 본문을 주제(소단원) 단위로 분할하는 도우미다. "
+    "내용을 바꾸지 말고, 흐름이 전환되는 지점에서만 나눠라."
+)
+
+
+def chunk_prompt(clean_text: str) -> list[dict]:
+    user = (
+        "다음 정제된 강의 본문을 주제 단위로 나누고 각 조각에 짧은 주제 라벨을 붙여 "
+        "아래 JSON 형식으로만 답하라. 원문 문장은 그대로 사용한다.\n"
+        '{"chunks": [{"topic": "자바 IO 패키지 개요", "text": "..."}]}\n\n'
+        f"---\n{clean_text}\n---"
+    )
+    return [{"role": "system", "content": _CHUNK_SYS},
+            {"role": "user", "content": user}]
