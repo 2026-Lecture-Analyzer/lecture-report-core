@@ -4,5 +4,7 @@
 transformers==4.46.3
 accelerate==1.1.1
 sentencepiece==0.2.0
+# 임베딩(KURE) — 토픽 분할·태깅 (§5/§9)
+sentence-transformers==3.3.1
 # 메모리 빠듯할 때만 (A100 40GB는 fp16로 충분, 보통 불필요)
 # bitsandbytes==0.44.1

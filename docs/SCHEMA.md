@@ -46,13 +46,23 @@ txt ─①─ raw.jsonl ─②─ merged.jsonl ─③④─ clean.jsonl ─⑤�
  "clean_text": "문어체로 정제된 본문", "summary": "다음 섹션용 한두 문장 요약"}
 ```
 
-## chunks.jsonl  (Step5, 모델) — 분석부 입력
-주제 단위 청크. P2의 입력.
+## overview.json  (Step3, §2) — 강의 개요 (정제 전역 맥락)
+강의(=`date_session`)별 키워드+주제 아웃라인. 메타 대신 스크립트에서 직접 추출.
 ```json
-{"chunk_id": 0, "section_id": 0, "file": "...", "date": "2026-02-02", "session": "오전",
- "topic": "자바 IO 패키지 개요", "clean_text": "...", "raw_ref": [0,1,...],
- "start_time": "09:11:17", "end_time": "09:20:03"}
+{"2026-02-02_오전": {"keywords": ["스트림","입출력","자바"], "outline": ["자바 IO 개요","스트림 실습"]}}
 ```
+
+## chunks.jsonl  (Step5, 임베딩) — 분석부 입력
+임베딩 기반 토픽 분할(`chunk_embed.py`) + **평가항목 태깅(`eval_tags`)** 포함.
+```json
+{"chunk_id": 0, "lecture_id": "2026-02-02_오전", "file": "...", "date": "2026-02-02",
+ "session": "오전", "pos": 0.05, "clean_text": "...", "raw_ref": [0,1,...],
+ "start_time": "09:11:17", "end_time": "09:20:03",
+ "eval_tags": [{"item_key": "C5_check", "sim": 0.62, "cue": "되셨어요"}]}
+```
+- `pos`: 강의 내 상대 위치(0~1, 도입/종료 항목 게이트용).
+- `eval_tags`: §9 태깅 결과(다중 라벨, 0개 허용). `item_key`는 `checklist.py` 기준.
+- (구버전 LLM 청킹 `chunk.py`는 fallback — `topic` 필드 사용.)
 
 ## analysis.jsonl  (P2, 모델)
 강의(=`date_session`)별 체크리스트 18항목 평가. 항목 1건 = 1행.
