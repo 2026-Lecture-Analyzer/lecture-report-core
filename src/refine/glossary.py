@@ -64,14 +64,22 @@ def build_candidates(sections: list[dict], generate_fn, out_path: Path,
         if i % sample_every:
             continue
         out = generate_fn(glossary_prompt(render_section(sec)))
-        data = extract_json(out) or {}
-        for c in data.get("corrections", []):
-            w, r = c.get("wrong"), c.get("correct")
-            if w and r:
+        data = extract_json(out)
+        if not isinstance(data, dict):   # 모델이 스키마를 안 지킨 경우 스킵
+            continue
+        for c in data.get("corrections", []) or []:
+            # dict {wrong,correct} 또는 [wrong, correct] 둘 다 허용
+            if isinstance(c, dict):
+                w, r = c.get("wrong"), c.get("correct")
+            elif isinstance(c, (list, tuple)) and len(c) >= 2:
+                w, r = c[0], c[1]
+            else:
+                continue
+            if isinstance(w, str) and isinstance(r, str) and w and r:
                 corr_counter[w] += 1
                 corr_map[w] = r
-        for t in data.get("terms", []):
-            if t:
+        for t in data.get("terms", []) or []:
+            if isinstance(t, str) and t:
                 term_counter[t] += 1
 
     candidates = {
