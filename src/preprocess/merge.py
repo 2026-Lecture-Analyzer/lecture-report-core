@@ -8,6 +8,11 @@
      이내로 한 블록으로 합침. "한 문장이 여러 타임스탬프로 쪼개진" 문제 해결.
      블록이 너무 커지지 않도록 시간/글자 상한(config) 적용.
 
+     [개선] 미완성 어미 감지: 발화가 ~고/~서/~면/~는데/~니까 등 접속 어미로
+     끝나면 시간 간격과 무관하게 다음 발화와 강제 병합한다.
+     단, max_block_sec / max_block_chars 상한은 여전히 적용해 블록이 무한정
+     커지는 것을 막는다.
+
 merged 블록 스키마:
     {block_id, file, date, session, speaker_id, speaker_role,
      start_time, end_time, start_sec, end_sec, dur_sec, n_utts,
@@ -16,11 +21,39 @@ merged 블록 스키마:
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
 from src import config
 
+# ---------------------------------------------------------------------------
+# 미완성 어미 패턴
+# ---------------------------------------------------------------------------
+# 발화 끝이 아래 패턴과 일치하면 문장이 아직 끝나지 않은 것으로 판단한다.
+# 패턴 설명:
+#   ~고, ~고요          → "읽고", "열고요"
+#   ~서, ~서요          → "해서", "있어서요"
+#   ~면, ~면서          → "하면", "되면서"
+#   ~는데, ~은데, ~ㄴ데 → "하는데", "있는데"
+#   ~니까, ~니깐        → "하니까"
+#   ~지만               → "하지만"
+#   ~거나               → "하거나"
+#   ~(으)면서           → "하면서"
+#   ~도록               → "하도록"
+#   ~어서, ~아서        → "나와서", "가져와서"
+# 줄 끝($)에 이 패턴이 있으면 미완성으로 본다.
+_INCOMPLETE_RE = re.compile(
+    r"(고요?|서요?|면서?|는데|은데|ㄴ데|니까|니깐|지만|거나|도록|어서|아서)\s*$"
+)
+
+
+def is_incomplete(text: str) -> bool:
+    """발화가 미완성 어미로 끝나는지 확인."""
+    return bool(_INCOMPLETE_RE.search(text.strip()))
+
+
+# ---------------------------------------------------------------------------
 
 def load_raw(raw_path: Path) -> list[dict]:
     with Path(raw_path).open(encoding="utf-8") as f:
@@ -55,7 +88,13 @@ def merge_utterances(
     max_block_sec: float | None = None,
     max_block_chars: int | None = None,
 ) -> list[dict]:
-    """연속 동일화자 발화를 블록으로 병합."""
+    """연속 동일화자 발화를 블록으로 병합.
+
+    기존 조건(시간 간격, 상한) 외에 미완성 어미 감지를 추가한다.
+    현재 블록의 마지막 발화가 미완성 어미로 끝나면 gap_sec 초과여도
+    같은 화자의 다음 발화를 강제로 이어 붙인다.
+    단, max_block_sec / max_block_chars 상한은 미완성 어미 상황에서도 유지한다.
+    """
     gap_sec = config.MERGE_GAP_SEC if gap_sec is None else gap_sec
     max_block_sec = config.MERGE_MAX_BLOCK_SEC if max_block_sec is None else max_block_sec
     max_block_chars = config.MERGE_MAX_BLOCK_CHARS if max_block_chars is None else max_block_chars
@@ -77,17 +116,40 @@ def merge_utterances(
         if r.get("malformed") or r.get("sec_of_day") is None:
             flush()  # 정형 이탈 줄은 경계로 처리
             continue
+
         role = speaker_map.get(r["file"], {}).get(r["speaker_id"], "미상")
         sec = r["sec_of_day"]
 
+        # 상한 초과 여부 (미완성 어미여도 이건 강제 분리)
+        over_time  = cur is not None and (sec - cur["start_sec"]) > max_block_sec
+        over_chars = cur is not None and (
+            sum(len(t) for t in cur["_texts"]) + len(r["text"])
+        ) > max_block_chars
+
+        # 현재 블록의 마지막 발화가 미완성 어미로 끝나는지
+        cur_incomplete = (
+            cur is not None
+            and cur["speaker_id"] == r["speaker_id"]
+            and cur["file"] == r["file"]
+            and is_incomplete(cur["_texts"][-1])
+            and not over_time
+            and not over_chars
+        )
+
+        # 기본 new_turn 판단 (기존 로직)
         new_turn = (
             cur is None
             or cur["file"] != r["file"]
             or cur["speaker_id"] != r["speaker_id"]
             or (sec - cur["end_sec"]) > gap_sec
-            or (sec - cur["start_sec"]) > max_block_sec
-            or (sum(len(t) for t in cur["_texts"]) + len(r["text"])) > max_block_chars
+            or over_time
+            or over_chars
         )
+
+        # 미완성 어미면 new_turn 을 덮어써서 강제 병합
+        if cur_incomplete:
+            new_turn = False
+
         if new_turn:
             flush()
             cur = dict(
@@ -106,7 +168,7 @@ def merge_utterances(
 
     for b in blocks:
         b["dur_sec"] = b["end_sec"] - b["start_sec"]
-    # 키 순서 정리
+
     cols = ["block_id", "file", "date", "session", "speaker_id", "speaker_role",
             "start_time", "end_time", "start_sec", "end_sec", "dur_sec",
             "n_utts", "text", "raw_ref"]
