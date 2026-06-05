@@ -123,21 +123,127 @@ KoNLPy는 **Java(JDK)** 가 필요합니다. JPype 최신 버전과 JDK 조합�
 원본 STT를 LLM 분석에 쓸 수 있는 형태로 가공한다. **원칙 2가지: ① 모델은 Step 3~5에만(1~2는 규칙)
 ② 원본 불변 + `raw_ref`로 타임스탬프까지 추적.**
 
-```
-txt ─①파싱─► raw.jsonl ─②화자매핑+병합─► merged.jsonl
-                                            │  (여기까지 로컬, GPU 불필요)
-        ┌───────────────────────────────────┘
-        ▼ (Colab A100, Solar-10.7B)
-   ③용어집 ─► ④섹션 정제 ─► clean.jsonl ─► ⑤주제 청킹 ─► chunks.jsonl
+```mermaid
+flowchart TD
+    IN["강의 STT txt × 15<br/>한 줄 = 시각 · 화자ID · 발화"]
+
+    subgraph LOCAL["🟢 로컬 · 규칙 기반 · GPU 불필요"]
+        direction TB
+        S1["① 파싱 · parse.py<br/>정규식 분해 + 12시간제→24시간제 보정"]
+        RAW[("raw.jsonl<br/>발화 1건=1행 · 전역 idx")]
+        S2A["②a 화자 매핑 · merge.py<br/>파일별 발화량 최다=강사, 나머지=학생N"]
+        SMAP[("speaker_map.json<br/>수동 보정 가능")]
+        S2B["②b 발화 병합 · merge.py<br/>동일화자 연속 gap≤20s 병합<br/>캡 150초 / 2000자"]
+        MERGED[("merged.jsonl<br/>블록 + raw_ref")]
+    end
+
+    subgraph COLAB["🔴 Colab A100 · 모델 Solar-10.7B"]
+        direction TB
+        S3["③ 용어집 후보 · glossary.py<br/>모델 1패스로 STT오류·용어 추출"]
+        GCAND[("glossary_candidates.json")]
+        REVIEW{"👤 사람 검수"}
+        GLOSS[("glossary.json<br/>corrections·rule치환 / terms")]
+        SEC["④a 섹션화 · sectionize.py<br/>인접 블록 → 2500자 섹션"]
+        S4["④b 정제 · refine.py · Solar<br/>rule 치환 → 용어집+직전요약+원문<br/>군더더기 제거·문어체·슬라이딩 윈도우"]
+        CKPT{"💾 체크포인트<br/>섹션 1건씩 저장·재개"}
+        CLEAN[("clean.jsonl<br/>raw_ref · summary")]
+        S5["⑤ 청킹 · chunk.py · 모델<br/>주제 단위 분할"]
+        CHUNKS[("chunks.jsonl<br/>topic · raw_ref · 분석부 입력")]
+    end
+
+    subgraph DOWN["⬛ 분석 → 스코어링 → 리포트 (baseline)"]
+        direction TB
+        S6["⑥ 분석 · engine.py · 모델<br/>체크리스트 18항목 평가"]
+        ANAL[("analysis.jsonl")]
+        S7["⑦ 스코어링 · scoring.py · 규칙<br/>카테고리 가중 → 0~100"]
+        SCORES[("scores.json")]
+        S8["⑧ 리포트 / 대시보드"]
+    end
+
+    META[("📋 메타데이터 CSV<br/>정답·검증 전용 · input 금지")]
+    EVAL["검증 · evaluate.py"]
+
+    IN --> S1 --> RAW
+    RAW --> S2A --> SMAP --> S2B
+    RAW --> S2B --> MERGED
+    MERGED --> S3 --> GCAND --> REVIEW --> GLOSS
+    MERGED --> SEC --> S4
+    GLOSS --> S4
+    S4 <--> CKPT
+    S4 --> CLEAN --> S5 --> CHUNKS
+    CHUNKS --> S6 --> ANAL --> S7 --> SCORES --> S8
+    META --> EVAL
+    SCORES --> EVAL
+
+    classDef file fill:#eef2ff,stroke:#8899cc,color:#000;
+    classDef truth fill:#ffecec,stroke:#cc8888,color:#000;
+    class RAW,SMAP,MERGED,GCAND,GLOSS,CLEAN,CHUNKS,ANAL,SCORES file;
+    class META truth;
 ```
 
 | 단계 | 방식 | 입력 → 출력 | 실행 위치 |
 |---|---|---|---|
 | ① 파싱 | 규칙 | txt → `raw.jsonl` | 로컬 |
-| ② 화자매핑+병합 | 규칙 | raw → `merged.jsonl` (+`speaker_map.json`) | 로컬 |
+| ②a 화자 매핑 | 규칙 | raw → `speaker_map.json` | 로컬 |
+| ②b 발화 병합 | 규칙 | raw(+맵) → `merged.jsonl` | 로컬 |
 | ③ 용어집 | 모델 | merged → `glossary_candidates.json` → 검수 → `glossary.json` | Colab |
-| ④ 정제 | 모델(Solar) | merged+용어집 → `clean.jsonl` | Colab |
-| ⑤ 청킹 | 모델 | clean → `chunks.jsonl` (분석부 입력) | Colab |
+| ④a 섹션화 | 규칙 | merged → 섹션(메모리) | Colab |
+| ④b 정제 | 모델(Solar) | 섹션+용어집 → `clean.jsonl` | Colab |
+| ⑤ 청킹 | 모델 | clean → `chunks.jsonl` | Colab |
+| ⑥ 분석 | 모델 | chunks → `analysis.jsonl` | Colab |
+| ⑦ 스코어링 | 규칙 | analysis(+정답) → `scores.json` | 로컬 |
+| ⑧ 리포트 | 규칙 | scores → 리포트/대시보드 | 로컬 |
+
+### 단계별 상세 (모든 TODO 구현 = baseline 기준)
+
+> 관통 원칙: **① 모델은 ③~⑥에만(규칙으로 끝낼 건 규칙으로) ② 원본 불변 + `raw_ref`로 발화·타임스탬프까지 역추적 ③ 단계마다 manifest로 재현성**.
+
+**① 파싱 (규칙 · 로컬)** — `src/preprocess/parse.py`
+- 입력: `강의 스크립트/*.txt` 15개. 한 줄 = `<HH:MM:SS> 화자ID: 발화`.
+- 처리: 정규식으로 `{시각, 화자ID, 발화}` 분해. STT는 **12시간제(AM/PM 미표기)** → `01~06시를 13~18시로 보정`(`to_24h`). 정형 이탈 줄은 버리지 않고 `malformed=True`로 보존.
+- 출력: `raw.jsonl` — 발화 1건=1행, 전역 `idx`, `sec_of_day`(병합용), `session`(오전/오후).
+- 추적성: 모든 후속 산출물이 이 `idx`를 `raw_ref`로 참조.
+
+**②a 화자 매핑 (규칙 · 로컬)** — `src/preprocess/merge.py`
+- 해시 화자ID가 **세션마다 바뀌므로 파일(일자) 단위**로 집계. 발화량 최다=`강사`, 나머지=`학생N`.
+- 출력: `speaker_map.json` `{파일: {화자ID: 역할}}` — **사람이 수동 보정 가능**(보조강사/학생 오판 시).
+
+**②b 발화 병합 (규칙 · 로컬)** — `src/preprocess/merge.py`
+- 같은 화자의 연속 발화를 **시간 간격 `gap≤20초`** 기준으로 한 블록으로 병합 → "한 문장이 여러 타임스탬프로 쪼개진" 문제 해결.
+- 근거: 측정 결과 동일화자 연속 gap 중앙값 10초·81%가 ≤15초 → 원안 2~3초는 과분할이라 **20초로 상향**. 폭주 방지 캡(`150초`/`2000자`).
+- 출력: `merged.jsonl` — 블록 `{start/end_time, speaker_role, text, raw_ref[]}`. 22,756 발화 → 약 2,436 블록.
+
+**③ 용어집 (모델 1패스 + 사람 검수 · Colab)** — `src/refine/glossary.py`
+- 본 정제 전에 전사를 싸게 1패스 훑어 **STT 오류 후보(`잡바→Java`)·핵심 용어**를 모아 `glossary_candidates.json` 생성.
+- **사람이 검수** → `glossary.json` 확정. `corrections` 중 `rule:true`는 ④에서 모델 호출 **전에 결정적 치환**(일관성↑·모델부담↓), 나머지는 모델이 문맥으로 처리.
+- 같은 강의 시리즈면 재사용. `SEED_GLOSSARY`(EDA 확인 오류)가 시작점.
+
+**④a 섹션화 (규칙 · Colab)** — `src/refine/sectionize.py`
+- 정제는 문장 단위❌ **큰 섹션 단위**(맥락 보존). 같은 파일·세션 내 인접 블록을 `2500자` 한도로 누적해 섹션 구성. `block_ids`/`raw_ref` 유지.
+
+**④b 정제 (모델 Solar-10.7B · Colab)** — `src/refine/refine.py`
+- 입력 프롬프트 = `rule 치환 적용 원문` + `[확정 용어집] + [직전 섹션 요약] + [이번 섹션 원문]`.
+- 처리: 군더더기/간투사 제거 + 문어체 정리 + 용어 보정. **슬라이딩 윈도우**(직전 섹션 1~2문장 요약을 다음 섹션 맥락으로 전달, 출력은 이번 섹션만 → 중복 방지).
+- **체크포인트**: 섹션 1건 정제할 때마다 `clean.jsonl`에 즉시 append+flush. Colab 끊겨도 **이미 처리한 `section_id`는 건너뛰고 재개**(Drive에 두면 영속).
+- 출력: `clean.jsonl` `{section_id, clean_text, summary, raw_ref}` — 정제본이 원본 발화 범위(`raw_ref`)를 그대로 참조해 타임스탬프 추적 유지.
+
+**⑤ 청킹 (모델 · Colab)** — `src/refine/chunk.py`
+- 정제 텍스트를 **주제(소단원) 단위로 재분할**("복습→오늘 주제" 전환점). 각 청크에 `topic` 라벨.
+- 출력: `chunks.jsonl` `{chunk_id, topic, clean_text, raw_ref, time_range}` — **분석부(⑥)의 입력**.
+- v1 한계: 청크별 `raw_ref`는 부모 섹션 것을 상속(정밀 정렬은 향후 과제).
+
+**⑥ 분석 (모델 · Colab)** — `src/analyze/engine.py` *(P2 TODO)*
+- 강의(=`date_session`) 단위로 체크리스트 **18항목**을 LLM 평가 → 항목별 `{score 1~5, verdict, evidence[{chunk_id, quote}], comment}`. 체크포인트/재개.
+- 출력: `analysis.jsonl`(항목 1건=1행).
+
+**⑦ 스코어링 (규칙 · 로컬)** — `src/scoring/scoring.py` *(P3 TODO)*
+- 카테고리별 평균 → 가중합 → **0~100 종합 강의력 점수**. 강사/세션 비교, 주차 추이.
+- 출력: `scores.json`. + `evaluate.py`가 **메타데이터(정답)** 로 커버리지·정확도 검증(⚠️ 메타는 검증 전용, input 금지).
+
+**⑧ 리포트/대시보드 (규칙 · 로컬)** — `src/report/` *(P4 TODO)*
+- 강의별 리포트(MD→PDF/DOCX) + Streamlit 대시보드(점수·근거 인용 드릴다운).
+
+> **baseline의 알려진 한계(검토 포인트)**: 청크 `raw_ref` 정밀 정렬 부재 · 용어집 수동 검수 의존 · 항목별 토큰 초과 시 청크 선별(임베딩) 미적용 · 점수 가중치 미확정 · 정제 품질 정량 지표 부재. → 여기에 더할 것 검토.
 
 ### 로컬: Step 0~2 (GPU 불필요)
 
