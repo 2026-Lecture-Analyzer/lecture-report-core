@@ -15,11 +15,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import re
+
 from src import config
 from src.refine.glossary import apply_corrections
 from src.refine.jsonout import extract_json
 from src.refine.prompts import refine_prompt
 from src.refine.sectionize import render_section
+
+# render_section 이 붙이는 [CTX] 줄 제거용
+_CTX_LINE_RE = re.compile(r"^\[CTX\].*$", re.MULTILINE)
 
 
 def _load_done(out_path: Path):
@@ -57,9 +62,9 @@ def run_refine(sections: list[dict], glossary: dict, generate_fn,
             data = extract_json(out) or {}
             clean_text = (data.get("clean_text") or "").strip()
             summary = (data.get("summary") or "").strip()[:config.CONTEXT_SUMMARY_MAX_CHARS]
-            if not clean_text:  # 파싱 실패 시 원문 보존(추적성 우선)
-                clean_text = rendered
-                log(f"[warn] section {sec['section_id']} JSON 파싱 실패 — 원문 보존")
+            if not clean_text:  # 파싱 실패 시 [MAIN] 블록만 추출해 원문 보존(추적성 우선)
+                clean_text = _CTX_LINE_RE.sub("", rendered).strip()
+                log(f"[warn] section {sec['section_id']} JSON 파싱 실패 — 원문 보존([CTX] 제거)")
             rec = {
                 "section_id": sec["section_id"], "file": sec["file"],
                 "date": sec["date"], "session": sec["session"],
