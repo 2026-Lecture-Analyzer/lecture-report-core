@@ -47,6 +47,20 @@ SECTION_MAX_CHARS = 2500
 # 슬라이딩 윈도우: 다음 섹션에 넘길 직전 섹션 요약 최대 글자.
 CONTEXT_SUMMARY_MAX_CHARS = 400
 
+# ── 임베딩(태깅·청킹, Step 5 / §9) — KURE 한국어 검색 특화 ──────────────
+EMBED_MODEL_ID = "nlpai-lab/KURE-v1"   # 대안: BAAI/bge-m3, BM-K/KoSimCSE-roberta
+# 임베딩 기반 토픽 분할(TextTiling-lite)
+SEG_DEPTH_C = 0.4        # 경계 임계: depth > mean + c*std
+SEG_MIN_SENTS = 3        # 청크 최소 문장 수
+SEG_MAX_SENTS = 25       # 청크 최대 문장 수(폭주 방지)
+# 평가항목 태깅
+TAG_SIM_THRESHOLD = 0.45 # 임베딩 유사도 태깅 임계
+INTRO_RATIO = 0.20       # 도입부 = 강의 앞 20%
+OUTRO_RATIO = 0.20       # 종료부 = 강의 뒤 20%
+
+# ── 개요 추출(Step 3, §2) ──────────────────────────────────────────────
+OVERVIEW_TOP_KEYWORDS = 15   # 강의별 핵심 키워드 수(KoNLPy)
+
 # ── 도메인 상수 ────────────────────────────────────────────────────────
 # 오전/오후 세션 경계 (메타데이터: 오전 09:00~12:00, 오후 13:00~18:00)
 SESSION_SPLIT_HOUR = 13
