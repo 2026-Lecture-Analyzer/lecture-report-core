@@ -64,14 +64,21 @@ txt ─①─ raw.jsonl ─②─ merged.jsonl ─③④─ clean.jsonl ─⑤�
 - `eval_tags`: §9 태깅 결과(다중 라벨, 0개 허용). `item_key`는 `checklist.py` 기준.
 - (구버전 LLM 청킹 `chunk.py`는 fallback — `topic` 필드 사용.)
 
-## analysis.jsonl  (P2, 모델)
-강의(=`date_session`)별 체크리스트 18항목 평가. 항목 1건 = 1행.
+## analysis.jsonl  (P2, 모델) — 4갈래 라우팅 평가
+강의(=`date_session`)별 체크리스트 18항목 평가. 항목 1건 = 1행. 항목은 `eval_type`으로 라우팅돼
+서로 다른 입력을 본다(검색형=태깅 청크, 위치형=도입/종료, 전역형=압축뷰, 지표형=선계산 숫자).
 ```json
 {"lecture_id": "2026-02-02_오전", "file": "...", "date": "2026-02-02", "session": "오전",
- "item_key": "C1_repetition", "category": "C1", "score": 4, "verdict": "양호",
- "evidence": [{"chunk_id": 12, "quote": "실제 인용"}], "comment": "근거 기반 평가"}
+ "item_key": "C3_analogy", "category": "C3", "eval_type": "local",
+ "score": 4, "verdict": "양호",
+ "evidence": [{"chunk_id": 12, "quote": "실제 인용"}],
+ "metric": null,
+ "comment": "근거 기반 평가",
+ "routing": {"n_candidates": 3, "expanded": 0, "negative_evidence": false, "cross_checked": false}}
 ```
-- `item_key`/`category`는 `src/analyze/checklist.py`가 진실원천(18개 고정). `score`는 1~5.
+- `item_key`/`category`/`eval_type`은 `src/analyze/checklist.py`가 진실원천(18개 고정). `score`는 1~5(`null`=N/A).
+- `metric`: 지표형(`metric`)이면 `{"name": "pace", "value": 312.5}`, 그 외 `null`.
+- `routing`: 라우팅 메타 — `n_candidates`(후보 청크 수), `expanded`(문맥확장 횟수 0~2), `negative_evidence`(태그 0 부정 증거), `cross_checked`(전역 교차확인 여부).
 
 ## scores.json  (P3, 규칙)
 ```json

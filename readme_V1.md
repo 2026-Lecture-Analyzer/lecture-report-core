@@ -84,9 +84,12 @@ lecture-analyzer/
 │   │   ├── chunk.py                       #     ⑤  LLM 청킹(fallback)
 │   │   ├── prompts.py / jsonout.py        #     프롬프트 / 모델출력 JSON 파싱
 │   │   └── model.py                       #     Solar-10.7B 로더/generate_fn
-│   ├── analyze/                           #   분석 엔진 (P2) — 18항목 4갈래 평가
+│   ├── analyze/                           #   분석 엔진 (P2) — 18항목 4갈래 라우팅 평가
 │   │   ├── checklist.py                   #     18항목 정의(진실원천·weight·eval_type·seed_keywords)
-│   │   ├── prompts.py / engine.py         #     항목 프롬프트 / chunks→analysis.jsonl
+│   │   ├── metrics.py 🚧                  #     지표 선계산(pace·filler·존반말·미완결)
+│   │   ├── router.py 🚧                   #     항목→입력 선별 + eval_type 디스패치
+│   │   ├── context_expand.py 🚧          #     raw_ref 인접 블록 확장(풀버전 문맥확장)
+│   │   ├── prompts.py / engine.py         #     유형별 프롬프트 / chunks→analysis.jsonl
 │   ├── scoring/                           #   스코어링·검증 (P3)
 │   │   ├── scoring.py                     #     항목별 가중 → 종합점수
 │   │   └── evaluate.py                    #     메타데이터(정답) 기반 검증
@@ -283,7 +286,8 @@ flowchart TD
 - LLM 청킹([chunk.py](src/refine/chunk.py))은 **fallback**(임베딩 불가 환경). `topic` 라벨 사용.
 
 **⑥ 분석 (모델 · Colab)** — [src/analyze/engine.py](src/analyze/engine.py) *(P2)*
-- 강의(=`lecture_id`) 단위로 18항목을 **`eval_type`에 따라 4갈래 라우팅**해 평가(§평가 설계) → 항목별 `{score 1~5, verdict, evidence[{chunk_id, quote}], comment}`. 체크포인트/재개.
+- 강의(=`lecture_id`) 단위로 18항목을 **`eval_type`에 따라 4갈래 라우팅**해 평가 → 항목별 `{score 1~5, verdict, evidence[{chunk_id, quote}], comment}`. 체크포인트/재개.
+- 🟠 검색형은 **태깅된 청크만 + 풀버전 문맥확장**, 🔵 지표형은 **숫자 선계산 후 규칙 채점**, 🔴 전역형은 **압축 전역 뷰**. **상세 알고리즘·모듈 계획은 아래 「⚙️ ⑥ 분석 엔진 상세 로직」 섹션**.
 - 출력: `analysis.jsonl`(항목 1건=1행).
 
 **⑦ 스코어링 (규칙 · 로컬)** — [src/scoring/scoring.py](src/scoring/scoring.py) *(P3)*
@@ -363,6 +367,93 @@ python -m scripts.smoke_chunk_embed  # (선택) ⑤ 임베딩 청킹·태깅·�
 - **🔵 지표형(2)**: 발화속도(분당 글자·타임스탬프), 필러빈도(EDA 기존) → **LLM 전에 숫자로** 산출, LLM은 해석만.
 
 > ⚠️ **단일화자 재해석**: 제공 데이터는 사실상 강사 1명(§EDA)이라 진짜 학생 Q&A가 없다. `C5_answer`를 "학생 발화 뒤 강사 응답"으로 보면 항상 N/A가 되어 죽은 항목이 되므로, **강사가 질문을 유도하고 답하려는 상호작용 뉘앙스**(예: "질문 있으세요?", "왜 안 될까요?" 후 설명)로 재해석해 강사 발화만으로 평가한다(`needs_student=False`). 진짜 다화자 데이터가 오면 `needs_student`/`SINGLE_SPEAKER`로 원래 의미 복원.
+
+---
+
+## ⚙️ ⑥ 분석 엔진 상세 로직 (4갈래 라우팅 · 구현 예정 P2)
+
+§평가 설계의 4갈래를 **실행 가능한 알고리즘**으로 구체화한다. 핵심은 *항목마다 전체를 다시 읽지 않는다* — `eval_type`으로 라우팅해 **필요한 입력만** LLM에 넣는다.
+
+### 입력 / 출력
+- **입력**: `chunks.jsonl`(eval_tags·pos·raw_ref·clean_text) + `overview.json`(전역 맥락) + `merged.jsonl`(타임스탬프·문맥확장용 원본 블록) + `clean.jsonl`(섹션 요약, 전역형용)
+- **출력**: `analysis.jsonl` — 강의×18항목, 1항목=1행. **체크포인트/재개**(이미 평가된 `(lecture_id, item_key)`는 건너뜀 — refine과 동일 패턴).
+
+### 라우터 (의사코드)
+```python
+for lecture in group_by_lecture(chunks):           # lecture_id = f"{date}_{session}"
+    metrics  = compute_metrics(lecture.chunks, lecture.blocks)   # 지표 1회 선계산
+    overview = overviews[lecture.id]
+    for item in CHECKLIST:                          # 18항목
+        et = item["eval_type"]
+        if   et == "metric":          row = eval_metric(item, metrics)
+        elif et in ("intro","outro"): row = eval_position(item, lecture.chunks)
+        elif et == "local":           row = eval_local(item, lecture.chunks, lecture.blocks)
+        elif et == "global":          row = eval_global(item, lecture, overview, metrics)
+        append_and_flush(out, row)                  # 체크포인트
+```
+
+### 🔵 metric (2) — `C1_repetition`, `C3_pace` · **LLM 전에 숫자로**
+- `metrics.py`가 결정적으로 선계산:
+  - `pace`: 분당 글자수·발화수 = Σ글자 / 총 발화시간(분) — `merged` 타임스탬프(`dur_sec`)에서.
+  - `filler_rate`: 필러 토큰수 ÷ 전체 토큰수(`config.FILLER_WORDS`).
+- **점수는 규칙**(임계값 → 1~5, 임계값은 §2차 EDA로 캘리브레이션). LLM은 **해석/코멘트만** (선택). `evidence`엔 수치를 남김 → 리포트에서 "분당 OOO자".
+
+### 🟢🟡 position (3) — `C2_objective`·`C2_review`(intro), `C2_summary`(outro)
+- `pos` 게이트로 **도입부/종료부 청크만** 후보(`pos≤INTRO_RATIO` / `pos≥1-OUTRO_RATIO`, 첫·끝 청크는 항상 허용). eval_tags가 이미 위치 게이트를 반영하므로 **해당 항목 태깅 청크**가 곧 후보.
+- 후보만 LLM 투입. 후보 0개 = **부정 증거**(도입부에 목표 안내/복습 안 함) → 낮은 점수.
+
+### 🟠 local (9) — 검색형 · **풀버전 문맥확장**
+```python
+def eval_local(item, chunks, blocks):
+    cands = sorted([c for c in chunks if tagged(c, item)], key=sim, reverse=True)
+    if not cands:                                   # (4) 태그 0개 = 부정 증거 후보
+        cross = llm_cross_check(item, condensed(chunks), overview)   # lexical-gap 오탐 방지 1회
+        return cross if cross.found else negative(item)              # 못 찾으면 낮은 점수
+    ctx = render(cands[:TOP_K])                     # (2) 항목별 top-k만
+    for attempt in range(MAX_EXPAND + 1):           # (3) 풀버전 확장 루프
+        out = llm(local_prompt(item, ctx))          #     {score, evidence, comment, needs_more}
+        if not out.needs_more or attempt == MAX_EXPAND:
+            return out
+        ctx = expand_context(cands[:TOP_K], blocks, n=EXPAND_BLOCKS * (attempt + 1))
+```
+- **(3) 문맥확장(풀버전)**: LLM이 `needs_more=true`("근거 부족")를 반환할 때만, evidence 청크의 `raw_ref`로 **시간 인접 원본 블록**을 N개 끌어와(`[확장맥락]` 태그) 재조회. 최대 `MAX_EXPAND`(1~2)회. 무한 확장 방지.
+- **(4) 부정 증거**: 항목 태그가 강의 전체에서 0개면 "강사가 안 함"으로 보되, lexical-gap 오탐 방지로 **전역 뷰 1회 교차확인** 후 확정. (태깅 단계 `coverage()`가 0 항목을 미리 알려줌)
+- 태깅 결과(`{chunk_id, cue, sim}`)가 그대로 `evidence`로 흐름 → 추적성 공짜.
+
+### 🔴 global (4) — `C1_completeness`·`C1_consistency`·`C2_order`·`C3_prerequisite`
+- 블록 검색 불가 → **압축 전역 뷰**로 판정: `overview.outline` + 섹션 요약(`clean.summary`) + 토픽 시퀀스 + **지표 신호**.
+  - `C1_completeness` ← 미완결 문장 비율(`is_incomplete` 재사용) 지표 + 샘플.
+  - `C1_consistency` ← 존댓말/반말 어미 비율 지표 + 샘플.
+  - `C2_order` ← 청크 `topic`/outline **순서 시퀀스**(개념→예시→실습 흐름).
+  - `C3_prerequisite` ← outline 인접 주제 난이도 점프 여부.
+- 압축 뷰만 LLM 투입(전체 재독 ❌).
+
+### 부정 증거 · N/A 정책
+- **부정 증거**(태그 0 + 교차확인 실패) = 점수 낮음(1~2) + `routing.negative_evidence=True`. 에러 아님.
+- **N/A**(`score=null`): `needs_student` 미충족 등 평가 불가. 단일화자라 현재 N/A 없음(§단일화자).
+
+### analysis.jsonl 스키마 (확장)
+```jsonc
+{ "lecture_id": "2026-02-02_오전", "file": "...", "date": "...", "session": "오전",
+  "item_key": "C3_analogy", "category": "C3", "eval_type": "local",
+  "score": 4, "verdict": "양호",
+  "evidence": [{"chunk_id": 12, "quote": "마치 물을 따르는 것과 같습니다"}],
+  "metric": null,                                   // metric 유형이면 {name, value}
+  "comment": "근거 기반 한두 문장",
+  "routing": {"n_candidates": 3, "expanded": 0, "negative_evidence": false, "cross_checked": false} }
+```
+
+### 구현 모듈 계획 (P2 · 아직 코드 미작성)
+| 모듈 | 역할 |
+|---|---|
+| `src/analyze/metrics.py` 🚧 | 지표 선계산(pace·filler·존반말·미완결) — `merged`/`config.FILLER_WORDS` 재사용 |
+| `src/analyze/router.py` 🚧 | 항목→입력 선별 + `eval_type` 디스패치(local/position/global/metric) |
+| `src/analyze/context_expand.py` 🚧 | `raw_ref` 인접 원본 블록 확장(풀버전 (3)단계) |
+| `src/analyze/prompts.py` 🚧 | 유형별 프롬프트(local/position/global/metric-해석) + `needs_more` 플래그 |
+| `src/analyze/engine.py` 🚧 | `run_analysis` 루프 — 라우팅·확장·체크포인트/재개 |
+
+### config 추가 예정 (§2차 EDA로 캘리브레이션)
+`ANALYZE_TOP_K=4` · `ANALYZE_MAX_EXPAND=2` · `ANALYZE_EXPAND_BLOCKS=2` · `PACE_CPM_LOW/HIGH`(속도 컷) · `FILLER_RATE_HIGH`(필러 기준선) — 임계값은 2차 EDA 측정치로 확정.
 
 ---
 
