@@ -1,6 +1,8 @@
 """임베딩 청킹·태깅·개요 배관 스모크 테스트 (KURE 없이 stub 임베더로).
 
 실제 임베딩 품질이 아니라 '플럼빙'(분할→태깅→추적성→위치게이트)만 검증.
+주의: stub 임베더는 의미가 아니라 어휘 기반이라 dense 유사도가 낮다. 하이브리드 태깅
+규칙(dense 주신호)을 배관 수준에서 통과시키려고 아래에서 태깅 임계를 낮춘다(품질 X·배관 O).
 사용법: python -m scripts.smoke_chunk_embed
 """
 import json
@@ -13,9 +15,14 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src import config  # noqa: E402
 from src.refine.chunk_embed import run_chunk_embed  # noqa: E402
 from src.refine.overview import build_overview, extract_keywords  # noqa: E402
 from src.refine.tagging import coverage  # noqa: E402
+
+# stub(어휘) 임베더용 임계 완화 — 실제 KURE/Upstage는 config 기본값(0.45/0.30) 사용.
+config.TAG_SIM_THRESHOLD = 0.05
+config.TAG_SIM_THRESHOLD_KW = 0.0
 
 
 def stub_embed_fn(texts):
