@@ -70,10 +70,12 @@ def make_generate_fn(model, tokenizer, max_new_tokens: int = None):
 
 # ── Upstage Solar API 백엔드 (OpenAI 호환) ──────────────────────────────
 def make_upstage_generate_fn(api_key: str = None, model: str = None,
-                             base_url: str = None, max_tokens: int = None):
+                             base_url: str = None, max_tokens: int = None,
+                             temperature: float = 0):
     """Upstage Solar API 호출 generate_fn. messages 는 OpenAI chat 포맷 그대로.
 
-    키: 인자 > 환경변수 UPSTAGE_API_KEY(.env 자동 로드). 결정적 재현성 위해 temperature=0.
+    키: 인자 > 환경변수 UPSTAGE_API_KEY(.env 자동 로드). 기본 temperature=0(결정적).
+    self-consistency(다수결) 용으로 temperature>0 을 주면 샘플 다양성이 생긴다.
     GPU 불필요 → 로컬에서도 정제 파이프라인을 끝까지 돌릴 수 있다.
     """
     from openai import OpenAI
@@ -91,7 +93,7 @@ def make_upstage_generate_fn(api_key: str = None, model: str = None,
     def generate_fn(messages: list[dict]) -> str:
         resp = client.chat.completions.create(
             model=model, messages=messages,
-            temperature=0, max_tokens=max_tokens,
+            temperature=temperature, max_tokens=max_tokens,
         )
         return resp.choices[0].message.content or ""
 
