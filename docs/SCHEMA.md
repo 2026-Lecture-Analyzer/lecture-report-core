@@ -61,8 +61,9 @@ txt ─①─ raw.jsonl ─②─ merged.jsonl ─③④─ clean.jsonl ─⑤�
  "eval_tags": [{"item_key": "C5_check", "sim": 0.62, "score": 0.67, "cue": "되셨어요"}]}
 ```
 - `pos`: 강의 내 상대 위치(0~1, 도입/종료 항목 게이트용).
-- `eval_tags`: §9 하이브리드 태깅 결과(다중 라벨, 0개 허용). `item_key`는 `checklist.py` 기준.
-  - `sim`: dense 임베딩 유사도(주 신호). `score`: 랭킹용 = sim + 키워드 가중. `cue`: 매칭된 시드 키워드(없으면 null=의미만으로 태깅).
+- `eval_tags`: §9 항목당 top-k 검색 결과(다중 라벨, 0개 허용=항목 부재). `item_key`는 `checklist.py` 기준.
+  - `sim`: dense 임베딩 유사도(랭킹 주신호). `score`: sim + 키워드 가산점. `cue`: 매칭된 시드 키워드(없으면 null=의미만으로 검색). 항목당 최대 `TAG_TOP_K`개(강의 단위).
+  - ⑤는 recall 후보생성기 — 정밀 판정(FP 제거)은 ⑥ 분석의 LLM 이 한다.
 - (구버전 LLM 청킹 `chunk.py`는 fallback — `topic` 필드 사용.)
 
 ## analysis.jsonl  (P2, 모델) — 4갈래 라우팅 평가
@@ -81,13 +82,18 @@ txt ─①─ raw.jsonl ─②─ merged.jsonl ─③④─ clean.jsonl ─⑤�
 - `metric`: 지표형(`metric`)이면 `{"name": "pace", "value": 312.5}`, 그 외 `null`.
 - `routing`: 라우팅 메타 — `n_candidates`(후보 청크 수), `expanded`(문맥확장 횟수 0~2), `negative_evidence`(태그 0 부정 증거), `cross_checked`(전역 교차확인 여부).
 
-## scores.json  (P3, 규칙)
+## scores.json  (P3, 규칙) — 항목별 가중
 ```json
-{"lectures": {"2026-02-02_오전": {"date": "2026-02-02", "session": "오전",
-   "category_scores": {"C1": 75.0, "C2": 60.0, "C3": 80.0, "C4": 55.0, "C5": 50.0},
-   "total_score": 64.0}}}
+{"lectures": {"2026-02-03_오전": {"date": "2026-02-03", "session": "오전",
+   "category_scores": {"C1": 85.7, "C2": 27.3, "C3": 27.5, "C4": 34.4, "C5": 8.3},
+   "total_score": 33.9, "n_na": 0,
+   "items": [{"item_key": "C1_repetition", "category": "C1", "score": 5,
+              "norm": 100.0, "weight": 3, "negative": false}]}},
+ "summary": {"n_lectures": 2, "avg_total": 32.8, "by_date": {"2026-02-03": 32.8}}}
 ```
-- 점수는 0~100 정규화. 가중치 `CATEGORY_WEIGHTS`(기본 균등).
+- 점수 0~100 정규화(score 1~5 → 0~100). **항목별 가중**(`checklist.weight` high3/mid2/low1) 평균 — 카테고리 균등 ❌.
+- `n_na`: N/A(score=null) 항목 수(가중에서 제외). `items[].negative`: 부정 증거 여부.
+- `summary.by_date`: 일자/주차별 평균(추이).
 
 ## reports/  (P4)
 강의별 `report_{lecture_id}.md` (→ PDF/DOCX), Streamlit 대시보드.
