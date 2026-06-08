@@ -446,6 +446,11 @@ def eval_local(item, chunks, blocks):
   - `C3_prerequisite` ← outline 인접 주제 난이도 점프 여부.
 - 압축 뷰만 LLM 투입(전체 재독 ❌).
 
+### 🗣️ 상호작용 항목(C5) — 문맥 윈도우 LLM (교실담화 연구 정석)
+`C5_check`·`C5_engage`·`C5_answer`는 **어투·상호작용 뉘앙스**라 임베딩 유사도만으론 약하다. 교실담화 자동평가 문헌(arXiv 2306.14918)은 단일 문장이 아니라 **"현재 발화 + 직전 턴"의 문맥 윈도우**로 분류하고, 강사의 **uptake(학생 발화 받아주기)·IRE 패턴**을 본다.
+- ⑤ 태깅은 **후보 chunk만** 잡고(dense+키워드), 확정은 ⑥에서 **LLM이 해당 chunk + `raw_ref` 인접 턴(문맥 윈도우)을 읽고** 톤·상호작용을 판정 → 검색형 (3)단계 문맥확장과 같은 메커니즘.
+- ⚠️ **전사본 한계**: 어투·전달력·강사 presence 등 **비텍스트 요소는 전사본에 없다**(문헌도 "명료성"에서 텍스트-학생평가 일치가 약함을 보고). 우리 점수는 **렉시컬 프록시까지**임을 리포트에 명시.
+
 ### 부정 증거 · N/A 정책
 - **부정 증거**(태그 0 + 교차확인 실패) = 점수 낮음(1~2) + `routing.negative_evidence=True`. 에러 아님.
 - **N/A**(`score=null`): `needs_student` 미충족 등 평가 불가. 단일화자라 현재 N/A 없음(§단일화자).
@@ -488,12 +493,20 @@ def eval_local(item, chunks, blocks):
 ```
 → **다중 라벨**(한 chunk가 여러 항목), **0개도 허용**(일반 강의 내용).
 
-### 왜 룰만으론 안 되고 임베딩+LLM이어야 하나
-시드 키워드 사전은 **꼭 만들지만**(`checklist.py`의 `seed_keywords`), 키워드만으론:
-1. **표현 다양성(lexical gap)**: "예를 들어" 없이도 예시를 듦 → 순수 키워드는 recall 낮음 → **KURE 임베딩 유사도 병행**(주 신호).
-2. **문맥 의존**: 앞 문장을 봐야 태그가 정해지는 문장이 있음 → 청킹 LLM/임베딩이 섹션 맥락을 같이 봄.
+### 왜 dense 의미검색이 주 신호인가 (문헌 근거)
+루브릭 평가 근거 검색의 **문헌 표준은 dense(의미) 검색**이지 키워드가 아니다:
+- **RubricRAG**: 근거를 dense 임베딩으로 검색 — 의미기반이 어휘기반보다 downstream 우위(Spearman ρ 0.545 vs 파인튜닝 0.457), 검색이 환각 8.7%→3.1%로 감소.
+- **DAT(하이브리드)**: dense + 키워드(BM25)를 **가중**해 섞되 dense가 백본. 키워드는 버리지 않고 **보조**.
 
-→ **역할 분담**: 룰 키워드 = (a) 약한 신호·1차 필터, 임베딩 = 주 신호. 현재 구현([tagging.py](src/refine/tagging.py))은 **시드 키워드 OR 임베딩 유사도 ≥ 임계**.
+우리 데이터(구어체)는 키워드가 특히 모호("예를 들어" 없이 예시, "이해됐죠?"의 톤) → **키워드 단독은 위험**. 그래서:
+
+→ **하이브리드 규칙**([tagging.py](src/refine/tagging.py)): **dense가 주 신호**, 키워드는 임계를 낮추는 **가중 보조**.
+```
+태깅:  sim ≥ TAG_SIM_THRESHOLD                          (dense 단독으로 충분)
+   OR (키워드 hit AND sim ≥ TAG_SIM_THRESHOLD_KW)       (키워드가 임계를 낮춤)
+랭킹:  score = sim + (키워드 hit 시 TAG_KEYWORD_BONUS)
+```
+→ 키워드만 맞고 **의미 유사도가 낮으면 태깅 안 함**(구어체 오탐 차단). 임계는 §2차 EDA로 캘리브레이션.
 
 ### 💰 비용 핵심: 별도 패스 만들지 말고 **기존 임베딩에 folding**
 태깅만 하려고 한 바퀴 더 돌리면 토큰 낭비. 대신 **⑤ 임베딩 청킹이 이미 문장 임베딩을 계산**하니, 그 임베딩을 태깅에 재사용 → **추가 호출 0회**([chunk_embed.py](src/refine/chunk_embed.py)).
@@ -515,7 +528,8 @@ def eval_local(item, chunks, blocks):
 | 문장 병합 | sentence boundary | 화자+시간 규칙 병합(+미완성 어미) | ✅ 실용 변형 |
 | 토픽 분할(⑤) | **임베딩/계층**(TreeSeg) | 임베딩 분할(메인) + LLM(fallback) | 🔧 **임베딩 기반으로 승격** |
 | 평가(⑥) | 독립평가+**calibration** | 독립평가+항목 가중 | ✅독립 / 🔧calibration 향후 옵션 |
-| 평가 검색 | RubricRAG | 키워드+임베딩 태깅 | ✅ 방향 일치 |
+| 평가 검색 | RubricRAG(dense)·DAT(hybrid) | dense 주신호+키워드 가중 보조 | 🔧 **dense 1순위로 정정**(키워드 단독 X) |
+| 상호작용 분류 | 문맥윈도우+seq labeling(교실담화) | ⑤후보→⑥문맥 LLM(uptake/IRE) | 🔧 **2단계+문맥윈도우 채택** |
 
 ### 모델 선택 (확정)
 | 용도 | 모델 | 비고 |
@@ -527,7 +541,7 @@ def eval_local(item, chunks, blocks):
 
 **핵심 메시지**: 전용모델 가성비가 가장 좋은 곳은 "구어체 정리"가 아니라 **"임베딩(태깅·분할)"**. KURE를 태깅·분할에 박으면 키워드 한계를 의미유사도로 메워 정확도가 오르고 LLM 호출도 준다. 구어체 정리는 전용 모델이 없으니 LLM 유지가 맞다.
 
-**출처**: [LLM-Rubric](https://arxiv.org/html/2501.00274v1) · [RubricRAG](https://arxiv.org/pdf/2603.20882) · [TreeSeg](https://arxiv.org/pdf/2407.12028) · [LLM TextTiling](https://github.com/saeedabc/llm-text-tiling) · [KURE](https://github.com/nlpai-lab/KURE) · [CT-Transformer(구두점+disfluency)](https://arxiv.org/pdf/2003.01309)
+**출처**: [LLM-Rubric](https://arxiv.org/html/2501.00274v1) · [RubricRAG](https://arxiv.org/html/2603.20882v1) · [DAT 하이브리드 검색](https://arxiv.org/pdf/2503.23013) · [교실담화 자동 루브릭 채점](https://arxiv.org/html/2306.14918) · [SteLLA(구조화 채점 RAG)](https://arxiv.org/pdf/2501.09092) · [TreeSeg](https://arxiv.org/pdf/2407.12028) · [KURE](https://github.com/nlpai-lab/KURE) · [CT-Transformer(구두점+disfluency)](https://arxiv.org/pdf/2003.01309)
 
 ---
 
