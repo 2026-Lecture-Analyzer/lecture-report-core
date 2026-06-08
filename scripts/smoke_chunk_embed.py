@@ -20,9 +20,9 @@ from src.refine.chunk_embed import run_chunk_embed  # noqa: E402
 from src.refine.overview import build_overview, extract_keywords  # noqa: E402
 from src.refine.tagging import coverage  # noqa: E402
 
-# stub(어휘) 임베더용 임계 완화 — 실제 KURE/Upstage는 config 기본값(0.45/0.30) 사용.
-config.TAG_SIM_THRESHOLD = 0.05
-config.TAG_SIM_THRESHOLD_KW = 0.0
+# stub(어휘) 임베더는 dense 유사도가 낮으니 검색 floor 를 0 으로 — 항목당 top-k 배관만 확인.
+config.TAG_RETRIEVE_FLOOR = 0.0
+config.TAG_FLOOR_KW = 0.0
 
 
 def stub_embed_fn(texts):
