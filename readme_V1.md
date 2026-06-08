@@ -144,6 +144,13 @@ python -m scripts.run_eda
 - **Colab**: 노트북 백엔드 셀에서 `getpass`로 입력(키가 코드/Drive에 안 남음). 또는 Drive `.env`.
 - 모델명·엔드포인트는 `config.UPSTAGE_MODEL`(`solar-pro2`)·`UPSTAGE_BASE_URL`에서 조정.
 
+### 🧩 임베딩 백엔드 (청킹·태깅 ⑤) — Upstage API / KURE
+임베딩도 `config.EMBED_BACKEND`로 분기(둘 다 `embed_fn(texts)->ndarray` 동일 인터페이스):
+- **`"upstage"`(기본)** — Upstage 임베딩 API. 같은 `UPSTAGE_API_KEY` 사용, **모델 다운로드·GPU 불필요**.
+- **`"kure"`** — `nlpai-lab/KURE-v1`(품질 1순위·§연구근거). `sentence-transformers` 필요, ~2GB 다운로드, GPU 권장(CPU 가능).
+
+> ✅ **GPU 없이 전체 로컬 실행**: `MODEL_BACKEND=upstage` + `EMBED_BACKEND=upstage`면 ③④⑤가 전부 API 호출이라 **`openai` 패키지 + 키 하나로 로컬에서 끝**난다(KURE 다운로드·Colab 불필요). KURE 품질이 필요할 때만 `EMBED_BACKEND=kure`.
+
 ### KoNLPy(형태소 분석) 주의
 KoNLPy는 **Java(JDK)** 가 필요합니다. JPype 최신 버전 + JDK 조합에서 JVM 경로 탐지 버그가 있어,
 [src/config.py](src/config.py)의 `resolve_jvm_path()`가 `JAVA_HOME` 또는 `/usr/libexec/java_home`에서
@@ -575,7 +582,7 @@ def eval_local(item, chunks, blocks):
 | 구분 | 도구 |
 |---|---|
 | LLM(정제·분석) | **Upstage Solar API**(기본) / Solar-10.7B HF(Colab GPU) — `config.MODEL_BACKEND` 분기 |
-| 임베딩 | KURE(`nlpai-lab/KURE-v1`) · sentence-transformers |
+| 임베딩 | **Upstage 임베딩 API**(기본) / KURE(`nlpai-lab/KURE-v1`·품질 1순위) — `config.EMBED_BACKEND` 분기 |
 | NLP | KoNLPy(Okt) · pandas |
 | 시각화 / 대시보드 | Streamlit / matplotlib |
 | 문서 생성 | ReportLab / python-docx |

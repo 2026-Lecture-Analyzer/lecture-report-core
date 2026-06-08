@@ -74,8 +74,13 @@ SECTION_MAX_CHARS = 2500
 # 슬라이딩 윈도우: 다음 섹션에 넘길 직전 섹션 요약 최대 글자.
 CONTEXT_SUMMARY_MAX_CHARS = 400
 
-# ── 임베딩(태깅·청킹, Step 5 / §9) — KURE 한국어 검색 특화 ──────────────
-EMBED_MODEL_ID = "nlpai-lab/KURE-v1"   # 대안: BAAI/bge-m3, BM-K/KoSimCSE-roberta
+# ── 임베딩(태깅·청킹, Step 5 / §9) ─────────────────────────────────────
+# 백엔드 선택(둘 다 embed_fn(texts)->np.ndarray[n,d] 동일 인터페이스):
+#   "kure"    : nlpai-lab/KURE-v1 (sentence-transformers) — 품질 1순위(§11), GPU 권장·CPU 가능, ~2GB 다운로드
+#   "upstage" : Upstage 임베딩 API — 다운로드·GPU 불필요(UPSTAGE_API_KEY). openai 패키지만 있으면 로컬 OK
+EMBED_BACKEND = "upstage"
+EMBED_MODEL_ID = "nlpai-lab/KURE-v1"          # (kure) 대안: BAAI/bge-m3, BM-K/KoSimCSE-roberta
+UPSTAGE_EMBED_MODEL = "embedding-passage"     # (upstage) 대안: solar-embedding-1-large-passage
 # 임베딩 기반 토픽 분할(TextTiling-lite)
 SEG_DEPTH_C = 0.4        # 경계 임계: depth > mean + c*std
 SEG_MIN_SENTS = 3        # 청크 최소 문장 수
