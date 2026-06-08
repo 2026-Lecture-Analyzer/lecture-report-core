@@ -47,7 +47,9 @@ def main() -> None:
     ap.add_argument("--out-dir", type=Path, default=config.PROCESSED_DIR)
     ap.add_argument("--glossary", type=Path, default=config.PROCESSED_DIR / "glossary.json",
                     help="없으면 SEED_GLOSSARY 사용")
-    ap.add_argument("--lecture", default=None, help="한 강의만(date_session)")
+    ap.add_argument("--file", default=None,
+                    help="한 txt 파일만(오전+오후 전체). 예: 2026-02-02_kdt-backendj-21th.txt")
+    ap.add_argument("--lecture", default=None, help="한 강의만(date_session). 예: 2026-02-02_오전")
     ap.add_argument("--max-sections", type=int, default=None, help="앞 N섹션만 정제")
     ap.add_argument("--overview-llm", action="store_true", help="개요 아웃라인 LLM 생성")
     ap.add_argument("--model-backend", default=None, help="hf|upstage (기본 config)")
@@ -66,8 +68,13 @@ def main() -> None:
     if not args.merged.exists():
         sys.exit(f"merged.jsonl 없음: {args.merged} — 먼저 `python -m scripts.run_preprocess`")
 
-    # ── 1) 로드 + (선택) 강의 필터 ──
+    # ── 1) 로드 + (선택) 파일/강의 필터 ──
     merged = load_merged(args.merged)
+    if args.file:
+        merged = [b for b in merged
+                  if b["file"] == args.file or Path(b["file"]).name == args.file]
+        if not merged:
+            sys.exit(f"파일 {args.file} 에 해당하는 블록이 없음")
     if args.lecture:
         merged = [b for b in merged if _lecture_id(b) == args.lecture]
         if not merged:
