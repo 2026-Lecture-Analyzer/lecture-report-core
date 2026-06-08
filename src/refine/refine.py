@@ -45,7 +45,10 @@ def _load_done(out_path: Path):
 
 
 def run_refine(sections: list[dict], glossary: dict, generate_fn,
-               out_path: Path, log=print) -> dict:
+               out_path: Path, log=print, overviews: dict | None = None) -> dict:
+    """섹션 정제. overviews={lecture_id: {keywords, outline}} 주면 [강의 개요]를
+    전역 맥락으로 프롬프트에 주입한다(§설계철학 A). lecture_id = f"{date}_{session}".
+    """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     done, prev_summary = _load_done(out_path)
@@ -57,8 +60,11 @@ def run_refine(sections: list[dict], glossary: dict, generate_fn,
         for sec in sections:
             if sec["section_id"] in done:
                 continue
+            overview = None
+            if overviews:
+                overview = overviews.get(f"{sec['date']}_{sec['session']}")
             rendered = apply_corrections(render_section(sec), glossary)
-            out = generate_fn(refine_prompt(rendered, glossary, prev_summary))
+            out = generate_fn(refine_prompt(rendered, glossary, prev_summary, overview))
             data = extract_json(out) or {}
             clean_text = (data.get("clean_text") or "").strip()
             summary = (data.get("summary") or "").strip()[:config.CONTEXT_SUMMARY_MAX_CHARS]

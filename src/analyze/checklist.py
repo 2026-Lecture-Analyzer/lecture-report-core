@@ -13,7 +13,9 @@ KYS 설계(§3, §9)에서 도출한 **평가 유형(eval_type)** · **시드 �
     eval_type    : 평가 라우팅 유형
                    "metric" 지표계산 · "intro" 도입부 · "outro" 종료부
                    "local" 국소-분산(검색·태깅) · "global" 전역
-    needs_student: 학생 발화가 있어야 평가 가능(없으면 N/A)
+    needs_student: 학생 발화가 있어야 평가 가능(없으면 N/A). 제공 데이터는 단일화자
+                   (config.SINGLE_SPEAKER)라 현재 전 항목 False — C5_answer는 강사의
+                   질문 유도·응답 상호작용 뉘앙스로 재해석해 평가한다.
     seed_keywords: 룰 태깅용 시드(임베딩과 병행). 약한 신호로 취급.
 """
 from __future__ import annotations
@@ -103,10 +105,13 @@ CHECKLIST = [
      "description": "일방적 설명이 아닌 수강생의 직접 참여(풀어보기, 확인 등)를 유도하는가.",
      "weight": "high", "eval_type": "local", "needs_student": False,
      "seed_keywords": ["해보세요", "풀어", "직접 해", "해볼까요", "같이", "나와서"]},
-    {"key": "C5_answer", "category": "C5", "title": "질문 응답 충분성",
-     "description": "수강생 질문에 명확하고 충분하게 답변하는가.",
-     "weight": "high", "eval_type": "local", "needs_student": True,
-     "seed_keywords": ["질문", "여쭤", "물어", "답변"]},
+    {"key": "C5_answer", "category": "C5", "title": "질문 응답·상호작용",
+     "description": ("수강생의 질문이나 궁금증(명시적·암묵적)을 받아 강사가 충분히 "
+                     "응답·해소하려 하는가. 단일화자 데이터에서는 강사가 질문을 유도하고 "
+                     "답하려는 상호작용 뉘앙스로 판단('질문 있으세요?', '왜 안 될까요?' 후 설명 등)."),
+     "weight": "high", "eval_type": "local", "needs_student": False,
+     "seed_keywords": ["질문 있", "궁금한", "질문 받", "물어보", "여쭤",
+                       "왜 그러냐면", "왜 안", "혹시 질문", "답은"]},
 ]
 
 assert len(CHECKLIST) == 18, "체크리스트는 18개 항목이어야 함"

@@ -13,6 +13,9 @@
     - 경계 복원 지시 추가
       → [MAIN] 첫/끝 문장이 [CTX] 내용과 이어지는 경우 자연스럽게 완성한다.
       → 단, 내용 추가·왜곡 금지 가드 유지.
+    - [강의 개요] 전역 맥락 주입(§설계철학 A · overview.py)
+      → 메타 대신 스크립트에서 뽑은 키워드·주제를 도메인 맥락으로 제공.
+      → 용어 선택·STT 오류 복원 참고용. 개요 내용을 본문에 추가하지 않는다(가드).
 """
 from __future__ import annotations
 
@@ -57,14 +60,24 @@ _REFINE_SYS = (
     "앞 내용을 추가하지 말고 [MAIN] 첫 문장을 자연스러운 완전한 문장으로 시작되도록 정리한다.\n"
     "  (7) [MAIN] 마지막 문장이 뒤 [CTX]로 이어진다면, "
     "뒤 내용을 추가하지 말고 [MAIN] 마지막 문장을 자연스럽게 마무리한다.\n"
-    "  (8) [CTX] 내용은 clean_text 에 단 한 글자도 포함하지 않는다."
+    "  (8) [CTX] 내용은 clean_text 에 단 한 글자도 포함하지 않는다.\n"
+    "  (9) [강의 개요]는 이 강의 전체의 주제·키워드 맥락이다. 용어 선택과 STT 오류 "
+    "복원의 참고로만 쓰고, 개요 내용을 clean_text 에 새로 추가하지 않는다."
 )
 
 
-def refine_prompt(section_text: str, glossary: dict, prev_summary: str) -> list[dict]:
+def refine_prompt(section_text: str, glossary: dict, prev_summary: str,
+                  overview: dict | None = None) -> list[dict]:
     gloss_str = json.dumps(glossary, ensure_ascii=False)
     ctx = prev_summary.strip() or "(없음 — 강의 시작 부분)"
+    ov_block = ""
+    if overview:
+        kws = ", ".join(overview.get("keywords") or []) or "(없음)"
+        outline = overview.get("outline") or []
+        outline_str = "; ".join(outline) if outline else "(없음)"
+        ov_block = f"[강의 개요]\n키워드: {kws}\n주제: {outline_str}\n\n"
     user = (
+        f"{ov_block}"
         f"[용어집(JSON)]\n{gloss_str}\n\n"
         f"[직전 맥락 요약]\n{ctx}\n\n"
         f"[정제할 섹션 원문]\n{section_text}\n\n"

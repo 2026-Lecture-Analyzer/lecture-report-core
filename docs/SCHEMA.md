@@ -29,7 +29,7 @@ txt ─①─ raw.jsonl ─②─ merged.jsonl ─③④─ clean.jsonl ─⑤�
  "start_sec": 33077, "end_sec": 33221, "dur_sec": 144, "n_utts": 16,
  "text": "병합된 발화", "raw_ref": [0,1,2,...]}
 ```
-- `speaker_role`: `강사`/`학생N`/`미상`. 보조 테이블 `speaker_map.json` = `{file: {speaker_id: role}}`(수동 보정 가능).
+- `speaker_role`: `강사`/`학생N`/`미상`. 단, 제공 데이터는 단일화자(`config.SINGLE_SPEAKER=True`)라 전부 `강사`. 보조 테이블 `speaker_map.json` = `{file: {speaker_id: role}}`(수동 보정 가능).
 
 ## glossary.json  (Step3, 모델→사람 검수)
 ```json
