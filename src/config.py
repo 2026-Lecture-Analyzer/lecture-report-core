@@ -12,6 +12,15 @@ from pathlib import Path
 
 # ── 경로 ───────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# .env 자동 로드(있으면) — UPSTAGE_API_KEY 등. python-dotenv 없으면 조용히 패스.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_ROOT / ".env")
+except Exception:
+    pass
+
 DATA_ROOT = PROJECT_ROOT / "AI_Lecture_Analysis_Report_Generator"
 SCRIPT_DIR = DATA_ROOT / "강의 스크립트"
 METADATA_CSV = DATA_ROOT / "강의 메타데이터.csv"
@@ -37,12 +46,24 @@ MERGE_GAP_SEC = 20.0
 MERGE_MAX_BLOCK_SEC = 150.0
 MERGE_MAX_BLOCK_CHARS = 2000
 
-# ── 정제/모델(Step 3~5, Colab) 파라미터 ────────────────────────────────
+# ── 정제/모델(Step 3~5) 백엔드 ─────────────────────────────────────────
+# Solar 를 어디서 돌릴지 선택(둘 다 generate_fn(messages)->str 동일 인터페이스):
+#   "hf"      : HuggingFace 오픈모델(SOLAR-10.7B-Instruct) — Colab GPU 필요
+#   "upstage" : Upstage Solar API(클라우드) — UPSTAGE_API_KEY 필요, GPU 불필요(로컬 가능)
+MODEL_BACKEND = "upstage"
+
+# (hf 백엔드) HuggingFace 오픈모델
 MODEL_ID = "upstage/SOLAR-10.7B-Instruct-v1.0"
 # 재현성: 모델 가중치 revision 을 커밋 해시로 고정 권장(HF 페이지에서 확인 후 입력).
 # None 이면 main 최신 — 팀 재현성을 위해 실제 운영 시 반드시 핀할 것.
 MODEL_REVISION = None
-# 결정적 생성(재현성): 그리디 디코딩 + 시드 고정.
+
+# (upstage 백엔드) Upstage Solar API — OpenAI 호환. 키는 .env 의 UPSTAGE_API_KEY.
+# 엔드포인트·모델명은 Upstage 콘솔/문서 기준(바뀌면 여기만 수정).
+UPSTAGE_BASE_URL = "https://api.upstage.ai/v1"
+UPSTAGE_MODEL = "solar-pro2"   # 대안: solar-pro, solar-mini
+
+# 결정적 생성(재현성): 그리디/temperature=0 + 시드 고정.
 GEN_MAX_NEW_TOKENS = 1024
 GEN_DO_SAMPLE = False
 SEED = 42

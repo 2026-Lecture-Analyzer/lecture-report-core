@@ -127,12 +127,22 @@ python3.13 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # 3. 환경 변수 설정 (.env.example 복사 후 키 입력)
-cp .env.example .env
+cp .env.example .env        # 정제에 Upstage 백엔드 쓰면 UPSTAGE_API_KEY=... 입력
 
 # 4. EDA 리포트 생성
 python -m scripts.run_eda
 #   → outputs/eda/eda_report.md + figures/*.png 생성
 ```
+
+### 🔑 Solar 백엔드 (정제 ④) — Upstage API / HF 오픈모델
+정제 단계 LLM은 `config.MODEL_BACKEND`로 분기한다(둘 다 `generate_fn(messages)->str` 동일 인터페이스):
+- **`"upstage"`(기본)** — Upstage Solar API(클라우드, OpenAI 호환). **GPU 불필요 → 로컬에서도 정제 가능**. 키 필요.
+- **`"hf"`** — HuggingFace 오픈모델 `SOLAR-10.7B-Instruct`. Colab A100(fp16) 필요.
+
+**UPSTAGE_API_KEY 넣는 곳** (https://console.upstage.ai 발급):
+- **로컬**: `.env` 에 `UPSTAGE_API_KEY=...` → `config.py`가 시작 시 자동 로드(python-dotenv). 또는 `export UPSTAGE_API_KEY=...`.
+- **Colab**: 노트북 백엔드 셀에서 `getpass`로 입력(키가 코드/Drive에 안 남음). 또는 Drive `.env`.
+- 모델명·엔드포인트는 `config.UPSTAGE_MODEL`(`solar-pro2`)·`UPSTAGE_BASE_URL`에서 조정.
 
 ### KoNLPy(형태소 분석) 주의
 KoNLPy는 **Java(JDK)** 가 필요합니다. JPype 최신 버전 + JDK 조합에서 JVM 경로 탐지 버그가 있어,
@@ -307,10 +317,11 @@ python -m scripts.smoke_chunk_embed  # (선택) ⑤ 임베딩 청킹·태깅·�
 ```
 
 ```
-# Colab: ③~⑤ (A100 · Solar-10.7B + KURE)
+# Colab: ③~⑤ (Solar 백엔드 선택 + KURE 임베딩)
 1. outputs/processed/merged.jsonl 을 Google Drive MyDrive/lecture-analyzer/ 에 업로드
-2. notebooks/02_refine_colab.ipynb 를 Colab에서 열고 런타임 A100로 설정 후 순서대로 실행
-3. 산출물(clean.jsonl, chunks.jsonl)은 Drive에 1건씩 체크포인트 저장 — 끊겨도 해당 셀만 재실행하면 재개
+2. notebooks/02_refine_colab.ipynb 를 Colab에서 열고 백엔드 셀에서 BACKEND 선택
+   - upstage: GPU 불필요(키 입력) · hf: 런타임 A100
+3. 순서대로 실행. 산출물(clean.jsonl, chunks.jsonl)은 Drive에 1건씩 체크포인트 — 끊겨도 해당 셀만 재실행하면 재개
 ```
 
 > 코드는 repo에서, **데이터는 Drive에서**(분리). 데이터·정제 산출물은 git/공개 업로드 금지.
@@ -563,7 +574,7 @@ def eval_local(item, chunks, blocks):
 
 | 구분 | 도구 |
 |---|---|
-| LLM(정제·분석) | Solar-10.7B (Colab) / OpenAI · Claude API |
+| LLM(정제·분석) | **Upstage Solar API**(기본) / Solar-10.7B HF(Colab GPU) — `config.MODEL_BACKEND` 분기 |
 | 임베딩 | KURE(`nlpai-lab/KURE-v1`) · sentence-transformers |
 | NLP | KoNLPy(Okt) · pandas |
 | 시각화 / 대시보드 | Streamlit / matplotlib |
