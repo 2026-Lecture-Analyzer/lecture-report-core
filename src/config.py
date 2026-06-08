@@ -85,16 +85,32 @@ UPSTAGE_EMBED_MODEL = "embedding-passage"     # (upstage) 대안: solar-embeddin
 SEG_DEPTH_C = 0.4        # 경계 임계: depth > mean + c*std
 SEG_MIN_SENTS = 3        # 청크 최소 문장 수
 SEG_MAX_SENTS = 25       # 청크 최대 문장 수(폭주 방지)
-# 평가항목 태깅 — 하이브리드(dense 주 신호 + 키워드 가중 보조). 문헌: RubricRAG(dense)·DAT(hybrid).
-# 구어체에선 키워드가 모호 → 키워드 단독·저유사도 오탐을 막으려 dense를 1순위로 둔다.
-TAG_SIM_THRESHOLD = 0.45     # dense 단독으로 태깅하는 임계(주 신호)
-TAG_SIM_THRESHOLD_KW = 0.30  # 키워드 hit 시 낮춘 임계(보조) — 키워드만+저유사도는 태깅 안 함
-TAG_KEYWORD_BONUS = 0.05     # 랭킹 점수 가중(score = sim + bonus, 키워드 hit일 때)
+# 평가항목 태깅 — 항목당 top-k 검색(표준 RAG: dense retrieve → ⑥ LLM judge).
+# "임계값 넘는 거 전부"(과태깅) 대신 항목마다 가장 관련된 top-k 만 추린다. 문헌: RubricRAG·DAT.
+TAG_TOP_K = 5                # 항목당 검색할 관련 청크 수(RubricRAG k=5~20)
+# 후보 최소 유사도 — 변별력 있는 값이어야 부정 증거(항목 부재) 신호가 산다.
+# 0.35은 모든 항목이 top-k를 억지로 채움 → 0.45(실측: 관련 0.45+, 무관 baseline ~0.35-0.45).
+TAG_RETRIEVE_FLOOR = 0.45    # 이하면 무관 → 후보에서 제외(항목 부재면 top-k 미달=부정 증거)
+# 고정밀 cue 있으면 floor 를 여기로 낮춰 구제 — 저sim 진짜 인스턴스(예: '처럼' 비유) 살림.
+TAG_FLOOR_KW = 0.33         # 키워드 hit 시 적용하는 낮은 floor
+# 랭킹 가산점 — cue 있는 진짜가 generic 임베딩 FP 위로 가게. 0.15면 cue(sim 0.42)가
+# 무cue 노이즈(sim 0.53) 위로 올라가 LLM 이 진짜 근거를 먼저 본다(노이즈 감소).
+TAG_KEYWORD_BONUS = 0.15
 INTRO_RATIO = 0.20           # 도입부 = 강의 앞 20%
 OUTRO_RATIO = 0.20           # 종료부 = 강의 뒤 20%
 
 # ── 개요 추출(Step 3, §2) ──────────────────────────────────────────────
 OVERVIEW_TOP_KEYWORDS = 15   # 강의별 핵심 키워드 수(KoNLPy)
+
+# ── 분석 엔진(Step 6, P2) — 잠정값(§2차 EDA 캘리브레이션) ───────────────
+ANALYZE_EVIDENCE_K = 5       # 항목별 LLM 에 넣을 근거 청크 최대 수
+ANALYZE_MAX_EXPAND = 1       # 🟠 local 문맥확장 최대 횟수(needs_more 반환 시)
+ANALYZE_GLOBAL_SAMPLE = 8    # 🔴 global 압축뷰에 넣을 샘플 청크 수
+ANALYZE_SELF_CONSISTENCY = 1 # 항목당 LLM 채점 반복수(>1=다수결, 비결정성·놓침 완화)
+ANALYZE_SC_TEMPERATURE = 0.4 # self-consistency 샘플 다양성용 온도(반복수>1일 때)
+PACE_CPM_LOW = 300           # 발화속도 적정 하한(분당 글자) — 잠정
+PACE_CPM_HIGH = 700          # 적정 상한 — 잠정
+FILLER_RATE_HIGH = 0.15      # 필러율 '높음' 기준 — 잠정
 
 # ── 도메인 상수 ────────────────────────────────────────────────────────
 # 오전/오후 세션 경계 (메타데이터: 오전 09:00~12:00, 오후 13:00~18:00)
