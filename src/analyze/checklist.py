@@ -16,7 +16,8 @@ KYS 설계(§3, §9)에서 도출한 **평가 유형(eval_type)** · **시드 �
     needs_student: 학생 발화가 있어야 평가 가능(없으면 N/A). 제공 데이터는 단일화자
                    (config.SINGLE_SPEAKER)라 현재 전 항목 False — C5_answer는 강사의
                    질문 유도·응답 상호작용 뉘앙스로 재해석해 평가한다.
-    seed_keywords: 룰 태깅용 시드(임베딩과 병행). 약한 신호로 취급.
+    seed_keywords: 고정밀 cue. 태깅 검색에서 floor 구제(저sim 진짜 인스턴스 살림) +
+                   랭킹 가산점. 동음이의·기술homonym(실행/오류/따라 등)은 넣지 않는다.
 """
 from __future__ import annotations
 
@@ -49,7 +50,7 @@ CHECKLIST = [
     {"key": "C2_objective", "category": "C2", "title": "학습 목표 안내",
      "description": "강의 시작 시 오늘의 학습 목표와 진행 순서를 명확히 안내하는가.",
      "weight": "high", "eval_type": "intro", "needs_student": False,
-     "seed_keywords": ["오늘", "목표", "배울", "진행", "순서", "할 거", "하겠습니다"]},
+     "seed_keywords": ["오늘", "목표", "배울", "진행", "할 거", "하겠습니다"]},
     {"key": "C2_review", "category": "C2", "title": "전날 복습 연계",
      "description": "이전 강의 내용을 간략히 복습하고 오늘 내용과 연결하는가.",
      "weight": "high", "eval_type": "intro", "needs_student": False,
@@ -70,7 +71,7 @@ CHECKLIST = [
     {"key": "C3_definition", "category": "C3", "title": "개념 정의",
      "description": "핵심 개념을 처음 등장 시 명확하게 정의하는가.",
      "weight": "high", "eval_type": "local", "needs_student": False,
-     "seed_keywords": ["란", "이란", "정의", "라고 합니다", "라고 해", "의미", "개념"]},
+     "seed_keywords": ["이란", "정의", "라고 합니다", "라고 해", "의미"]},
     {"key": "C3_analogy", "category": "C3", "title": "비유 및 예시 활용",
      "description": "어려운 개념에 적절한 비유나 실생활 예시를 활용하는가.",
      "weight": "high", "eval_type": "local", "needs_student": False,
@@ -87,15 +88,15 @@ CHECKLIST = [
     {"key": "C4_example", "category": "C4", "title": "예시 적절성",
      "description": "예시가 강의 수준 및 실제 업무 현장과 연관성이 있는가.",
      "weight": "high", "eval_type": "local", "needs_student": False,
-     "seed_keywords": ["예시", "실무", "현업", "실제", "사례", "예로"]},
+     "seed_keywords": ["예시", "실무", "현업", "사례", "예로"]},
     {"key": "C4_practice", "category": "C4", "title": "실습 연계",
      "description": "이론 설명 후 실습으로 자연스럽게 연결되는가.",
      "weight": "high", "eval_type": "local", "needs_student": False,
-     "seed_keywords": ["실습", "해보", "직접", "따라", "코드", "쳐보", "실행"]},
+     "seed_keywords": ["실습", "해보", "직접", "쳐보"]},
     {"key": "C4_error", "category": "C4", "title": "오류 대응",
      "description": "실습 중 발생하는 오류나 질문에 적절히 대응하는가.",
      "weight": "mid", "eval_type": "local", "needs_student": False,
-     "seed_keywords": ["오류", "에러", "안 돼", "안돼", "왜 안", "버그", "틀렸"]},
+     "seed_keywords": ["에러", "안 돼", "안돼", "왜 안", "버그", "틀렸"]},
     # ── C5 수강생 상호작용 ──
     {"key": "C5_check", "category": "C5", "title": "이해 확인 질문",
      "description": "수강생의 이해 여부를 확인하는 질문을 적절히 하는가('되셨어요?','이해하셨나요?' 등).",
