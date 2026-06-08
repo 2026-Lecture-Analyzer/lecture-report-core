@@ -1,17 +1,23 @@
-"""평가항목 태깅(§9) — chunk 에 관련 평가항목(eval_tags) 다중 라벨 부착.
+"""평가항목 태깅(§9) — **항목당 top-k 검색**(표준 RAG: dense retrieve → ⑥ LLM judge).
 
-하이브리드 신호(문헌: RubricRAG=dense 검색, DAT=dense+키워드 가중):
-  (1) **dense 임베딩 유사도**(chunk vs 항목 description) — 주 신호. 구어체 lexical gap 보완.
-  (2) 시드 키워드 매칭 — 보조. 단독으론 약함(구어체에서 모호) → dense 임계를 낮춰주는 역할만.
+표준 패턴(라벨 없을 때): 임베딩으로 항목별 관련 청크 top-k 만 추리고(recall),
+정밀 판정은 ⑥ 분석의 LLM 이 그 청크+문맥을 읽고 한다(precision). 그래서 여기는
+**완벽할 필요 없는 후보 생성기** — "임계값 넘는 거 전부"(과태깅)가 아니라 항목당 top-k.
 
-태깅 규칙(키워드 단독·저유사도 오탐 방지):
-    sim ≥ TAG_SIM_THRESHOLD                         (dense 단독으로 충분)
-    OR (키워드 hit AND sim ≥ TAG_SIM_THRESHOLD_KW)  (키워드가 낮춘 임계 통과)
-랭킹 score = sim + (키워드 hit 시 TAG_KEYWORD_BONUS).
+신호(문헌: RubricRAG=dense 검색, DAT=dense+키워드 가중):
+  (1) **dense 임베딩 유사도**(chunk vs 항목 description) — 주 신호(랭킹 기준).
+  (2) 시드 키워드 매칭 — 보조. 동점 시 가산점(TAG_KEYWORD_BONUS)만, 단독 태깅 X.
+
+검색 규칙(항목마다):
+    후보 = 위치게이트 & ( sim ≥ TAG_RETRIEVE_FLOOR  OR  cue & sim ≥ TAG_FLOOR_KW )
+    태깅 = 후보를 score(=sim + cue 시 TAG_KEYWORD_BONUS) 내림차순 top-k(TAG_TOP_K)
+    후보 0개 → 태그 0 = 항목 부재(부정 증거 후보, §9)
+고정밀 cue(처럼·되셨어요 등)는 floor 를 낮춰(TAG_FLOOR_KW) 저sim 진짜 인스턴스를 살리고,
+가산점으로 generic 임베딩 FP 위로 끌어올린다. 동음이의 키워드는 checklist 에서 이미 제외.
 
 대상 = taggable_items()(국소/도입/종료). metric·global 은 chunk 태깅 안 함(§5).
 도입/종료 항목은 강의 앞/뒤 위치 chunk 에만 적용. 임베딩 1패스를 분할과 공유(folding).
-상호작용 항목(C5)의 톤·문맥 판단은 여기서 후보만 잡고, 확정은 ⑥ 분석의 문맥 LLM 단계(readme_V1).
+상호작용 항목(C5)의 톤·문맥 판단은 후보만 잡고, 확정은 ⑥ 분석의 문맥 LLM 단계(readme_V1).
 """
 from __future__ import annotations
 
@@ -26,14 +32,16 @@ def keyword_hits(text: str, seeds: list[str]) -> list[str]:
     return [kw for kw in seeds if kw and kw in text]
 
 
-def tag_chunks(chunks: list[dict], embed_fn,
-               sim_threshold: float = None) -> list[dict]:
-    """각 chunk 에 eval_tags 부착. chunks 는 같은 강의(파일·세션) 단위 리스트.
+def tag_chunks(chunks: list[dict], embed_fn, top_k: int = None,
+               floor: float = None, floor_kw: float = None) -> list[dict]:
+    """각 chunk 에 eval_tags 부착(항목당 top-k 검색). 같은 강의 단위 리스트.
 
     chunk 필요 필드: clean_text, (chunk_emb 없으면 여기서 계산), pos(0~1 위치).
-    반환: 같은 리스트(각 dict 에 "eval_tags" 추가).
+    반환: 같은 리스트(각 dict 에 "eval_tags" 추가, score 내림차순).
     """
-    sim_threshold = config.TAG_SIM_THRESHOLD if sim_threshold is None else sim_threshold
+    top_k = config.TAG_TOP_K if top_k is None else top_k
+    floor = config.TAG_RETRIEVE_FLOOR if floor is None else floor
+    floor_kw = config.TAG_FLOOR_KW if floor_kw is None else floor_kw
     items = taggable_items()
     if not chunks:
         return chunks
@@ -48,29 +56,36 @@ def tag_chunks(chunks: list[dict], embed_fn,
     sims = cosine_matrix(ch_emb, item_emb)                       # [n_chunks, m]
 
     n = len(chunks)
-    for ci, ch in enumerate(chunks):
-        pos = ch.get("pos", (ci + 0.5) / n)   # 강의 내 상대 위치 0~1
-        is_first, is_last = (ci == 0), (ci == n - 1)
-        tags = []
-        for mi, it in enumerate(items):
-            # 도입/종료 항목 위치 게이트 (첫/마지막 청크는 항상 허용 — 청크 수 적을 때 robust)
+    for ch in chunks:
+        ch["eval_tags"] = []
+    positions = [ch.get("pos", (ci + 0.5) / n) for ci, ch in enumerate(chunks)]
+
+    # 항목(=쿼리)마다 관련 청크 top-k 검색
+    for mi, it in enumerate(items):
+        cand = []
+        for ci, ch in enumerate(chunks):
+            pos, is_first, is_last = positions[ci], ci == 0, ci == n - 1
+            # 도입/종료 항목 위치 게이트(첫/마지막 청크는 항상 허용)
             if it["eval_type"] == "intro" and not (pos <= config.INTRO_RATIO or is_first):
                 continue
             if it["eval_type"] == "outro" and not (pos >= 1 - config.OUTRO_RATIO or is_last):
                 continue
-            hits = keyword_hits(ch["clean_text"], it["seed_keywords"])
             sim = float(sims[ci, mi])
-            # 하이브리드: dense 주 신호 + 키워드 가중 보조(키워드 단독·저유사도 오탐 방지)
-            tagged = sim >= sim_threshold or (hits and sim >= config.TAG_SIM_THRESHOLD_KW)
-            if tagged:
-                score = sim + (config.TAG_KEYWORD_BONUS if hits else 0.0)
-                tags.append({
-                    "item_key": it["key"],
-                    "sim": round(sim, 3),
-                    "score": round(score, 3),
-                    "cue": hits[0] if hits else None,
-                })
-        ch["eval_tags"] = sorted(tags, key=lambda t: -t["score"])
+            hits = keyword_hits(ch["clean_text"], it["seed_keywords"])
+            # cue 있으면 낮은 floor 로 구제(저sim 진짜 인스턴스 살림), 없으면 일반 floor
+            if sim < (floor_kw if hits else floor):
+                continue
+            score = sim + (config.TAG_KEYWORD_BONUS if hits else 0.0)
+            cand.append((ci, sim, score, hits[0] if hits else None))
+        cand.sort(key=lambda x: -x[2])    # score 내림차순
+        for ci, sim, score, cue in cand[:top_k]:
+            chunks[ci]["eval_tags"].append({
+                "item_key": it["key"], "sim": round(sim, 3),
+                "score": round(score, 3), "cue": cue,
+            })
+
+    for ch in chunks:
+        ch["eval_tags"].sort(key=lambda t: -t["score"])
     return chunks
 
 
