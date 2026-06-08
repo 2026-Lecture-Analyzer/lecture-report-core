@@ -58,10 +58,11 @@ txt ─①─ raw.jsonl ─②─ merged.jsonl ─③④─ clean.jsonl ─⑤�
 {"chunk_id": 0, "lecture_id": "2026-02-02_오전", "file": "...", "date": "2026-02-02",
  "session": "오전", "pos": 0.05, "clean_text": "...", "raw_ref": [0,1,...],
  "start_time": "09:11:17", "end_time": "09:20:03",
- "eval_tags": [{"item_key": "C5_check", "sim": 0.62, "cue": "되셨어요"}]}
+ "eval_tags": [{"item_key": "C5_check", "sim": 0.62, "score": 0.67, "cue": "되셨어요"}]}
 ```
 - `pos`: 강의 내 상대 위치(0~1, 도입/종료 항목 게이트용).
-- `eval_tags`: §9 태깅 결과(다중 라벨, 0개 허용). `item_key`는 `checklist.py` 기준.
+- `eval_tags`: §9 하이브리드 태깅 결과(다중 라벨, 0개 허용). `item_key`는 `checklist.py` 기준.
+  - `sim`: dense 임베딩 유사도(주 신호). `score`: 랭킹용 = sim + 키워드 가중. `cue`: 매칭된 시드 키워드(없으면 null=의미만으로 태깅).
 - (구버전 LLM 청킹 `chunk.py`는 fallback — `topic` 필드 사용.)
 
 ## analysis.jsonl  (P2, 모델) — 4갈래 라우팅 평가
