@@ -23,8 +23,9 @@ from src.refine.jsonout import extract_json
 from src.refine.prompts import refine_prompt
 from src.refine.sectionize import render_section
 
-# render_section 이 붙이는 [CTX] 줄 제거용
+# fallback 시 render_section 태그 제거용: [CTX] 줄 통째 삭제 + [MAIN][화자] 접두 제거
 _CTX_LINE_RE = re.compile(r"^\[CTX\].*$", re.MULTILINE)
+_MAIN_TAG_RE = re.compile(r"^\[MAIN\]\[[^\]]+\]\s*", re.MULTILINE)
 
 
 def _load_done(out_path: Path):
@@ -69,8 +70,9 @@ def run_refine(sections: list[dict], glossary: dict, generate_fn,
             clean_text = (data.get("clean_text") or "").strip()
             summary = (data.get("summary") or "").strip()[:config.CONTEXT_SUMMARY_MAX_CHARS]
             if not clean_text:  # 파싱 실패 시 [MAIN] 블록만 추출해 원문 보존(추적성 우선)
-                clean_text = _CTX_LINE_RE.sub("", rendered).strip()
-                log(f"[warn] section {sec['section_id']} JSON 파싱 실패 — 원문 보존([CTX] 제거)")
+                kept = _CTX_LINE_RE.sub("", rendered)        # [CTX] 줄 삭제
+                clean_text = _MAIN_TAG_RE.sub("", kept).strip()  # [MAIN][화자] 접두 제거
+                log(f"[warn] section {sec['section_id']} JSON 파싱 실패 — 원문 보존([CTX]/[MAIN] 태그 제거)")
             rec = {
                 "section_id": sec["section_id"], "file": sec["file"],
                 "date": sec["date"], "session": sec["session"],
