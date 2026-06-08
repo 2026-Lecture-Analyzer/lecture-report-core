@@ -85,10 +85,13 @@ UPSTAGE_EMBED_MODEL = "embedding-passage"     # (upstage) 대안: solar-embeddin
 SEG_DEPTH_C = 0.4        # 경계 임계: depth > mean + c*std
 SEG_MIN_SENTS = 3        # 청크 최소 문장 수
 SEG_MAX_SENTS = 25       # 청크 최대 문장 수(폭주 방지)
-# 평가항목 태깅
-TAG_SIM_THRESHOLD = 0.45 # 임베딩 유사도 태깅 임계
-INTRO_RATIO = 0.20       # 도입부 = 강의 앞 20%
-OUTRO_RATIO = 0.20       # 종료부 = 강의 뒤 20%
+# 평가항목 태깅 — 하이브리드(dense 주 신호 + 키워드 가중 보조). 문헌: RubricRAG(dense)·DAT(hybrid).
+# 구어체에선 키워드가 모호 → 키워드 단독·저유사도 오탐을 막으려 dense를 1순위로 둔다.
+TAG_SIM_THRESHOLD = 0.45     # dense 단독으로 태깅하는 임계(주 신호)
+TAG_SIM_THRESHOLD_KW = 0.30  # 키워드 hit 시 낮춘 임계(보조) — 키워드만+저유사도는 태깅 안 함
+TAG_KEYWORD_BONUS = 0.05     # 랭킹 점수 가중(score = sim + bonus, 키워드 hit일 때)
+INTRO_RATIO = 0.20           # 도입부 = 강의 앞 20%
+OUTRO_RATIO = 0.20           # 종료부 = 강의 뒤 20%
 
 # ── 개요 추출(Step 3, §2) ──────────────────────────────────────────────
 OVERVIEW_TOP_KEYWORDS = 15   # 강의별 핵심 키워드 수(KoNLPy)
