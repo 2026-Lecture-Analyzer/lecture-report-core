@@ -1,11 +1,17 @@
 """평가항목 태깅(§9) — chunk 에 관련 평가항목(eval_tags) 다중 라벨 부착.
 
-신호 2개를 합친다:
-  (1) 시드 키워드 매칭(룰, cheap·약한 신호)
-  (2) KURE 임베딩 유사도(chunk vs 항목 description) — lexical gap 보완(주 신호)
+하이브리드 신호(문헌: RubricRAG=dense 검색, DAT=dense+키워드 가중):
+  (1) **dense 임베딩 유사도**(chunk vs 항목 description) — 주 신호. 구어체 lexical gap 보완.
+  (2) 시드 키워드 매칭 — 보조. 단독으론 약함(구어체에서 모호) → dense 임계를 낮춰주는 역할만.
+
+태깅 규칙(키워드 단독·저유사도 오탐 방지):
+    sim ≥ TAG_SIM_THRESHOLD                         (dense 단독으로 충분)
+    OR (키워드 hit AND sim ≥ TAG_SIM_THRESHOLD_KW)  (키워드가 낮춘 임계 통과)
+랭킹 score = sim + (키워드 hit 시 TAG_KEYWORD_BONUS).
 
 대상 = taggable_items()(국소/도입/종료). metric·global 은 chunk 태깅 안 함(§5).
 도입/종료 항목은 강의 앞/뒤 위치 chunk 에만 적용. 임베딩 1패스를 분할과 공유(folding).
+상호작용 항목(C5)의 톤·문맥 판단은 여기서 후보만 잡고, 확정은 ⑥ 분석의 문맥 LLM 단계(readme_V1).
 """
 from __future__ import annotations
 
@@ -54,13 +60,17 @@ def tag_chunks(chunks: list[dict], embed_fn,
                 continue
             hits = keyword_hits(ch["clean_text"], it["seed_keywords"])
             sim = float(sims[ci, mi])
-            if hits or sim >= sim_threshold:
+            # 하이브리드: dense 주 신호 + 키워드 가중 보조(키워드 단독·저유사도 오탐 방지)
+            tagged = sim >= sim_threshold or (hits and sim >= config.TAG_SIM_THRESHOLD_KW)
+            if tagged:
+                score = sim + (config.TAG_KEYWORD_BONUS if hits else 0.0)
                 tags.append({
                     "item_key": it["key"],
                     "sim": round(sim, 3),
+                    "score": round(score, 3),
                     "cue": hits[0] if hits else None,
                 })
-        ch["eval_tags"] = sorted(tags, key=lambda t: -t["sim"])
+        ch["eval_tags"] = sorted(tags, key=lambda t: -t["score"])
     return chunks
 
 
