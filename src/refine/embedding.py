@@ -1,12 +1,16 @@
-"""한국어 임베딩 (KURE) — 토픽 분할(§5)·항목 태깅(§9) 공용.
+"""한국어 임베딩 — 토픽 분할(§5)·항목 태깅(§9) 공용. 백엔드 2종.
+
+  "kure"    : nlpai-lab/KURE-v1 (sentence-transformers) — 품질 1순위(§11), GPU 권장·CPU 가능
+  "upstage" : Upstage 임베딩 API(OpenAI 호환) — 다운로드·GPU 불필요, UPSTAGE_API_KEY
 
 문헌(TreeSeg/TextTiling·RubricRAG) 근거로 임베딩 기반을 메인으로 채택.
-모델은 KURE(한국어 검색 특화). sentence-transformers 필요 → Colab/로컬 설치.
-
-파이프라인 로직은 `embed_fn(list[str]) -> np.ndarray[n, d]` 주입으로 분리해,
+두 백엔드 모두 `embed_fn(list[str]) -> np.ndarray[n, d]`(L2 정규화) 동일 인터페이스라
+segment/tagging/chunk_embed 코드는 백엔드를 몰라도 된다. 디스패처: make_embedder_fn().
 모델 없이도 stub 임베더로 검증 가능(scripts/smoke_chunk_embed.py).
 """
 from __future__ import annotations
+
+import os
 
 import numpy as np
 
@@ -35,3 +39,51 @@ def cosine_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     a = a / (np.linalg.norm(a, axis=1, keepdims=True) + 1e-9)
     b = b / (np.linalg.norm(b, axis=1, keepdims=True) + 1e-9)
     return a @ b.T
+
+
+# ── Upstage 임베딩 API 백엔드 (OpenAI 호환) ─────────────────────────────
+def make_upstage_embed_fn(api_key: str = None, model: str = None,
+                          base_url: str = None, batch_size: int = 100):
+    """Upstage 임베딩 API embed_fn. texts -> L2 정규화 np.ndarray[n, d].
+
+    키: 인자 > 환경변수 UPSTAGE_API_KEY(.env 자동 로드). 다운로드·GPU 불필요.
+    입력은 batch_size 단위로 쪼개 호출(요청당 입력 수 제한 대응).
+    """
+    from openai import OpenAI
+
+    api_key = api_key or os.environ.get("UPSTAGE_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "UPSTAGE_API_KEY 가 없습니다. .env 에 UPSTAGE_API_KEY=... 를 넣거나 "
+            "환경변수로 export 하세요(Colab: getpass 로 주입)."
+        )
+    client = OpenAI(api_key=api_key, base_url=base_url or config.UPSTAGE_BASE_URL)
+    model = model or config.UPSTAGE_EMBED_MODEL
+
+    def embed_fn(texts: list[str]) -> np.ndarray:
+        texts = list(texts)
+        if not texts:
+            return np.zeros((0, 0), dtype=np.float32)
+        vecs: list = []
+        for i in range(0, len(texts), batch_size):
+            resp = client.embeddings.create(model=model, input=texts[i:i + batch_size])
+            vecs.extend(d.embedding for d in resp.data)
+        arr = np.asarray(vecs, dtype=np.float32)
+        arr /= (np.linalg.norm(arr, axis=1, keepdims=True) + 1e-9)
+        return arr
+
+    return embed_fn
+
+
+def make_embedder_fn(backend: str = None, **kwargs):
+    """임베딩 백엔드 디스패처 — config.EMBED_BACKEND 기본.
+
+    "upstage" → make_upstage_embed_fn(**kwargs)
+    "kure"    → make_embed_fn(load_embedder()) (kwargs 무시, ~2GB 다운로드)
+    """
+    backend = backend or config.EMBED_BACKEND
+    if backend == "upstage":
+        return make_upstage_embed_fn(**kwargs)
+    if backend == "kure":
+        return make_embed_fn(load_embedder())
+    raise ValueError(f"알 수 없는 EMBED_BACKEND: {backend!r} (kure|upstage)")

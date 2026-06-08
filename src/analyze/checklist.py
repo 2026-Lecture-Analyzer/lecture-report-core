@@ -13,8 +13,11 @@ KYS 설계(§3, §9)에서 도출한 **평가 유형(eval_type)** · **시드 �
     eval_type    : 평가 라우팅 유형
                    "metric" 지표계산 · "intro" 도입부 · "outro" 종료부
                    "local" 국소-분산(검색·태깅) · "global" 전역
-    needs_student: 학생 발화가 있어야 평가 가능(없으면 N/A)
-    seed_keywords: 룰 태깅용 시드(임베딩과 병행). 약한 신호로 취급.
+    needs_student: 학생 발화가 있어야 평가 가능(없으면 N/A). 제공 데이터는 단일화자
+                   (config.SINGLE_SPEAKER)라 현재 전 항목 False — C5_answer는 강사의
+                   질문 유도·응답 상호작용 뉘앙스로 재해석해 평가한다.
+    seed_keywords: 고정밀 cue. 태깅 검색에서 floor 구제(저sim 진짜 인스턴스 살림) +
+                   랭킹 가산점. 동음이의·기술homonym(실행/오류/따라 등)은 넣지 않는다.
 """
 from __future__ import annotations
 
@@ -47,7 +50,7 @@ CHECKLIST = [
     {"key": "C2_objective", "category": "C2", "title": "학습 목표 안내",
      "description": "강의 시작 시 오늘의 학습 목표와 진행 순서를 명확히 안내하는가.",
      "weight": "high", "eval_type": "intro", "needs_student": False,
-     "seed_keywords": ["오늘", "목표", "배울", "진행", "순서", "할 거", "하겠습니다"]},
+     "seed_keywords": ["오늘", "목표", "배울", "진행", "할 거", "하겠습니다"]},
     {"key": "C2_review", "category": "C2", "title": "전날 복습 연계",
      "description": "이전 강의 내용을 간략히 복습하고 오늘 내용과 연결하는가.",
      "weight": "high", "eval_type": "intro", "needs_student": False,
@@ -68,7 +71,7 @@ CHECKLIST = [
     {"key": "C3_definition", "category": "C3", "title": "개념 정의",
      "description": "핵심 개념을 처음 등장 시 명확하게 정의하는가.",
      "weight": "high", "eval_type": "local", "needs_student": False,
-     "seed_keywords": ["란", "이란", "정의", "라고 합니다", "라고 해", "의미", "개념"]},
+     "seed_keywords": ["이란", "정의", "라고 합니다", "라고 해", "의미"]},
     {"key": "C3_analogy", "category": "C3", "title": "비유 및 예시 활용",
      "description": "어려운 개념에 적절한 비유나 실생활 예시를 활용하는가.",
      "weight": "high", "eval_type": "local", "needs_student": False,
@@ -85,15 +88,15 @@ CHECKLIST = [
     {"key": "C4_example", "category": "C4", "title": "예시 적절성",
      "description": "예시가 강의 수준 및 실제 업무 현장과 연관성이 있는가.",
      "weight": "high", "eval_type": "local", "needs_student": False,
-     "seed_keywords": ["예시", "실무", "현업", "실제", "사례", "예로"]},
+     "seed_keywords": ["예시", "실무", "현업", "사례", "예로"]},
     {"key": "C4_practice", "category": "C4", "title": "실습 연계",
      "description": "이론 설명 후 실습으로 자연스럽게 연결되는가.",
      "weight": "high", "eval_type": "local", "needs_student": False,
-     "seed_keywords": ["실습", "해보", "직접", "따라", "코드", "쳐보", "실행"]},
+     "seed_keywords": ["실습", "해보", "직접", "쳐보"]},
     {"key": "C4_error", "category": "C4", "title": "오류 대응",
      "description": "실습 중 발생하는 오류나 질문에 적절히 대응하는가.",
      "weight": "mid", "eval_type": "local", "needs_student": False,
-     "seed_keywords": ["오류", "에러", "안 돼", "안돼", "왜 안", "버그", "틀렸"]},
+     "seed_keywords": ["에러", "안 돼", "안돼", "왜 안", "버그", "틀렸"]},
     # ── C5 수강생 상호작용 ──
     {"key": "C5_check", "category": "C5", "title": "이해 확인 질문",
      "description": "수강생의 이해 여부를 확인하는 질문을 적절히 하는가('되셨어요?','이해하셨나요?' 등).",
@@ -103,10 +106,13 @@ CHECKLIST = [
      "description": "일방적 설명이 아닌 수강생의 직접 참여(풀어보기, 확인 등)를 유도하는가.",
      "weight": "high", "eval_type": "local", "needs_student": False,
      "seed_keywords": ["해보세요", "풀어", "직접 해", "해볼까요", "같이", "나와서"]},
-    {"key": "C5_answer", "category": "C5", "title": "질문 응답 충분성",
-     "description": "수강생 질문에 명확하고 충분하게 답변하는가.",
-     "weight": "high", "eval_type": "local", "needs_student": True,
-     "seed_keywords": ["질문", "여쭤", "물어", "답변"]},
+    {"key": "C5_answer", "category": "C5", "title": "질문 응답·상호작용",
+     "description": ("수강생의 질문이나 궁금증(명시적·암묵적)을 받아 강사가 충분히 "
+                     "응답·해소하려 하는가. 단일화자 데이터에서는 강사가 질문을 유도하고 "
+                     "답하려는 상호작용 뉘앙스로 판단('질문 있으세요?', '왜 안 될까요?' 후 설명 등)."),
+     "weight": "high", "eval_type": "local", "needs_student": False,
+     "seed_keywords": ["질문 있", "궁금한", "질문 받", "물어보", "여쭤",
+                       "왜 그러냐면", "왜 안", "혹시 질문", "답은"]},
 ]
 
 assert len(CHECKLIST) == 18, "체크리스트는 18개 항목이어야 함"

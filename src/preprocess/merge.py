@@ -72,7 +72,11 @@ def build_speaker_map(records: list[dict]) -> dict[str, dict[str, str]]:
 
     발화량 최다 = 강사, 그다음부터 발화량 순으로 학생1, 학생2 ...
     동률은 speaker_id 오름차순으로 안정 정렬해 재현성을 보장한다.
+
+    config.SINGLE_SPEAKER=True 면(제공 데이터 기본) 모든 speaker_id 를 '강사'로
+    라벨한다. 소수 '학생' 라벨이 STT 오인식 아티팩트라 단일화자로 취급하기 위함.
     """
+    single = config.SINGLE_SPEAKER
     per_file: dict[str, Counter] = defaultdict(Counter)
     for r in records:
         if r.get("malformed") or not r.get("speaker_id"):
@@ -83,7 +87,7 @@ def build_speaker_map(records: list[dict]) -> dict[str, dict[str, str]]:
     for file, counter in per_file.items():
         # 발화량 내림차순, 동률은 speaker_id 오름차순(안정·재현 가능)
         ranked = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))
-        if len(ranked) >= 2 and ranked[0][1] == ranked[1][1]:
+        if not single and len(ranked) >= 2 and ranked[0][1] == ranked[1][1]:
             logger.warning(
                 "화자 매핑 모호: %s — 최다 발화 동률(%d건). "
                 "speaker_map.json 수동 확인 권장",
@@ -91,7 +95,7 @@ def build_speaker_map(records: list[dict]) -> dict[str, dict[str, str]]:
             )
         role: dict[str, str] = {}
         for i, (sid, _count) in enumerate(ranked):
-            role[sid] = ROLE_INSTRUCTOR if i == 0 else f"{ROLE_STUDENT_PREFIX}{i}"
+            role[sid] = ROLE_INSTRUCTOR if (single or i == 0) else f"{ROLE_STUDENT_PREFIX}{i}"
         mapping[file] = role
     logger.debug("화자 매핑 완료: %d개 파일", len(mapping))
     return mapping

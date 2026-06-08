@@ -5,6 +5,8 @@ AI_Lecture_Analysis_Report_Generator/
 # ===== 환경 변수 / API 키 =====
 .env
 .env.*
+# 키 값 비운 템플릿은 추적(시크릿 아님)
+!.env.example
 *.key
 secrets.*
 
