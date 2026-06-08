@@ -246,9 +246,9 @@ flowchart TD
 | ④a 섹션화 | 규칙 | merged → 섹션(+오버랩 CTX/MAIN) | Colab | ✅ |
 | ④b 정제 | 모델(Solar) | 섹션+용어집(+개요) → `clean.jsonl` | Colab | ✅ (개요 주입 TODO) |
 | ⑤ 임베딩 청킹+태깅 | 임베딩 | clean → `chunks.jsonl`(eval_tags) | Colab | ✅ |
-| ⑥ 분석 | 모델 | chunks → `analysis.jsonl` | Colab | 🚧 P2 |
-| ⑦ 스코어링 | 규칙 | analysis(+정답) → `scores.json` | 로컬 | 🚧 P3 |
-| ⑧ 리포트 | 규칙 | scores → 리포트/대시보드 | 로컬 | 🚧 P4 |
+| ⑥ 분석 | 모델 | chunks → `analysis.jsonl` | 로컬/Colab | ✅ 4갈래 라우팅 |
+| ⑦ 스코어링 | 규칙 | analysis → `scores.json` | 로컬 | ✅ 항목가중 |
+| ⑧ 리포트 | 규칙 | scores → 강의별 MD 리포트 | 로컬 | ✅ (대시보드 🚧) |
 
 ### 단계별 상세
 
@@ -498,15 +498,19 @@ def eval_local(item, chunks, blocks):
 - **RubricRAG**: 근거를 dense 임베딩으로 검색 — 의미기반이 어휘기반보다 downstream 우위(Spearman ρ 0.545 vs 파인튜닝 0.457), 검색이 환각 8.7%→3.1%로 감소.
 - **DAT(하이브리드)**: dense + 키워드(BM25)를 **가중**해 섞되 dense가 백본. 키워드는 버리지 않고 **보조**.
 
-우리 데이터(구어체)는 키워드가 특히 모호("예를 들어" 없이 예시, "이해됐죠?"의 톤) → **키워드 단독은 위험**. 그래서:
+### 검색 방식 = 항목당 top-k (임계값 전체긁기 ❌ — 표준 RAG)
+> 실측 교훈: "sim ≥ 임계값인 청크 **전부** 태깅"하면 추상항목(C4_error)이 청크의 절반에 붙는다(과태깅). 표준은 **항목마다 가장 관련된 top-k만 검색**(RubricRAG k=5~20).
 
-→ **하이브리드 규칙**([tagging.py](src/refine/tagging.py)): **dense가 주 신호**, 키워드는 임계를 낮추는 **가중 보조**.
+→ **검색 규칙**([tagging.py](src/refine/tagging.py)): 항목(=쿼리)마다 —
 ```
-태깅:  sim ≥ TAG_SIM_THRESHOLD                          (dense 단독으로 충분)
-   OR (키워드 hit AND sim ≥ TAG_SIM_THRESHOLD_KW)       (키워드가 임계를 낮춤)
-랭킹:  score = sim + (키워드 hit 시 TAG_KEYWORD_BONUS)
+후보 = 위치게이트 & ( sim ≥ TAG_RETRIEVE_FLOOR  OR  cue & sim ≥ TAG_FLOOR_KW )
+태깅 = 후보를 score(=sim + cue 시 TAG_KEYWORD_BONUS) 내림차순 top-k(TAG_TOP_K)
+후보 0개 → 태그 0 = 항목 부재(부정 증거 후보)
 ```
-→ 키워드만 맞고 **의미 유사도가 낮으면 태깅 안 함**(구어체 오탐 차단). 임계는 §2차 EDA로 캘리브레이션.
+- **dense 유사도가 랭킹 주신호**. **고정밀 cue**(처럼·되셨어요·에러…)는 `TAG_FLOOR_KW`로 floor를 낮춰 **저sim 진짜 인스턴스를 살리고**(예: "세 들어 사는 사람처럼" 비유), 가산점으로 generic 임베딩 FP 위로 끌어올린다.
+- **동음이의 cue 제거**(checklist): `실행`(execution)·`따라`(조사)·`오류`(API명)·`코드`(코드값)·`순서`(방문순서) 등은 시드에서 뺐다 — 구어체·기술 homonym FP 차단.
+- ⑤는 **완벽할 필요 없는 recall 후보생성기** — top-k 안의 오탐은 **⑥ LLM이 읽고 거른다**(precision). `floor`/`floor_kw`/`top_k`는 §2차 EDA로 캘리브레이션.
+- 실측(2026-02-03·95청크): 총 태그 192→85, 과발화(C4_error 49→10) top-k로 캡, 위치형(복습 1/요약 2)은 낮게 유지(부정증거 보존), 진짜 비유 cue 구제 복원.
 
 ### 💰 비용 핵심: 별도 패스 만들지 말고 **기존 임베딩에 folding**
 태깅만 하려고 한 바퀴 더 돌리면 토큰 낭비. 대신 **⑤ 임베딩 청킹이 이미 문장 임베딩을 계산**하니, 그 임베딩을 태깅에 재사용 → **추가 호출 0회**([chunk_embed.py](src/refine/chunk_embed.py)).
