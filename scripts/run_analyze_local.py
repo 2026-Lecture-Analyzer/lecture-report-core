@@ -52,12 +52,25 @@ def main() -> None:
     lectures = sorted({f"{c['date']}_{c['session']}" for c in chunks})
     n_local = sum(1 for c in chunks for t in c.get("eval_tags", []))  # 참고용
 
+    # 태그 0개 → 교차검증 1건씩 추가됨. 강의×태깅대상항목 중 태그 0개인 수를 추정.
+    from src.analyze.checklist import taggable_items
+    tag_keys = [it["key"] for it in taggable_items()]
+    n_crosscheck = 0
+    for lid in lectures:
+        lec_chunks = [c for c in chunks if f"{c['date']}_{c['session']}" == lid]
+        tagged_keys = {t["item_key"] for c in lec_chunks for t in c.get("eval_tags", [])}
+        n_crosscheck += sum(1 for k in tag_keys if k not in tagged_keys)
+
+    base_calls = 16 * len(lectures) * samples
+    cross_calls = n_crosscheck * samples
     print("─" * 60)
     print(f"백엔드 : 분석={args.backend or config.MODEL_BACKEND}"
           + (f" ({config.UPSTAGE_MODEL})" if (args.backend or config.MODEL_BACKEND) == "upstage" else ""))
     print(f"입력   : {args.chunks} ({len(chunks)}청크, 태그 {n_local}개)")
     print(f"강의   : {len(lectures)}편 {lectures}")
-    print(f"LLM 호출: 강의당 16건×{samples}회(SC) → 총 ~{16*len(lectures)*samples}건"
+    print(f"LLM 호출: 강의당 ~16건×{samples}회(SC) = {base_calls}건"
+          + (f" + 태그0 교차검증 ~{cross_calls}건 → 총 ~{base_calls + cross_calls}건"
+             if n_crosscheck else f" → 총 ~{base_calls}건")
           + (f" · self-consistency {samples}회 다수결" if samples > 1 else ""))
     print(f"산출   : {out_path}")
     print("─" * 60)
@@ -89,8 +102,10 @@ def main() -> None:
     rows = load_jsonl(out_path)
     avg = [r["score"] for r in rows if r.get("score") is not None]
     neg = sum(1 for r in rows if r.get("routing", {}).get("negative_evidence"))
+    na = sum(1 for r in rows if r.get("score") is None)
+    adj = sum(1 for r in rows if r.get("scoring_trace", {}).get("evidence_adjusted"))
     print(f"\n✅ 완료 — {len(rows)}행 / 평균점수 {round(sum(avg)/len(avg),2) if avg else 'NA'} "
-          f"/ 부정증거 {neg}항목")
+          f"/ 부정증거 {neg} / N/A {na} / 근거강등 {adj}항목")
     print("샘플:", json.dumps(rows[0], ensure_ascii=False)[:260])
 
 
