@@ -1,6 +1,7 @@
 # ===== 제공 데이터 (외부 공유/업로드 금지 · 절대 커밋 금지) =====
 # 강의 스크립트, 메타데이터, 품질평가 체크리스트, 기본 README 등 일체
 AI_Lecture_Analysis_Report_Generator/
+AI_Lecture_Analysis_Report_Generator
 
 # ===== 환경 변수 / API 키 =====
 .env

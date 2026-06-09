@@ -11,3 +11,5 @@ openai==2.41.0
 python-dotenv==1.2.2
 # 리포트 PDF 변환(⑧, 한글 TTF 필요 — macOS AppleGothic / Linux NanumGothic)
 reportlab==4.5.1
+# 대시보드(⑧, P4)
+streamlit==1.45.1
