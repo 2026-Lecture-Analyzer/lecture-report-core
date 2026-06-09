@@ -76,11 +76,16 @@ txt ─①─ raw.jsonl ─②─ merged.jsonl ─③④─ clean.jsonl ─⑤�
  "evidence": [{"chunk_id": 12, "quote": "실제 인용"}],
  "metric": null,
  "comment": "근거 기반 평가",
- "routing": {"n_candidates": 3, "expanded": 0, "negative_evidence": false, "cross_checked": false}}
+ "scoring_trace": {"raw_scores": [4,4,3], "final_score": 4, "agreement": 0.67},
+ "routing": {"n_candidates": 3, "expanded": 0,
+             "candidate_chunk_ids": [12,15], "context_chunk_ids": [],
+             "negative_evidence": false, "cross_checked": false}}
 ```
 - `item_key`/`category`/`eval_type`은 `src/analyze/checklist.py`가 진실원천(18개 고정). `score`는 1~5(`null`=N/A).
-- `metric`: 지표형(`metric`)이면 `{"name": "pace", "value": 312.5}`, 그 외 `null`.
-- `routing`: 라우팅 메타 — `n_candidates`(후보 청크 수), `expanded`(문맥확장 횟수 0~2), `negative_evidence`(태그 0 부정 증거), `cross_checked`(전역 교차확인 여부).
+- `verdict`: `우수/양호/보통/미흡/없음` 외에 `근거 부족`(고득점인데 인용 근거가 없어 자동 강등), `N/A`(지표 계산 불가로 평가 보류)도 가능.
+- `metric`: 지표형(`metric`)이면 `{"name": "pace", "value": 312.5}`, 그 외 `null`. 단 전역형이 규칙 지표와 혼합되면(C1_consistency·C1_completeness) 여기에 해당 지표값이 실린다.
+- `scoring_trace`: 점수 안정성 추적 — `raw_scores`(self-consistency 원점수 목록), `final_score`(최종 채택 점수), `agreement`(최종값과 일치한 표본 비율 0~1). 자동 강등 시 `evidence_adjusted: true`, 전역 규칙 혼합 시 `rule_score`(규칙 점수)가 추가된다. samples=1이면 `raw_scores`는 1개.
+- `routing`: 라우팅 메타 — `n_candidates`(후보 청크 수), `expanded`(문맥확장 횟수 0~2), `candidate_chunk_ids`(근거 후보 청크 id), `context_chunk_ids`(문맥확장으로 추가된 청크 id), `negative_evidence`(태그 0 부정 증거), `cross_checked`(태그 0일 때 교차검증 수행 여부), `rule_mixed`(전역형 규칙·LLM 혼합 여부, 해당 시).
 
 ## scores.json  (P3, 규칙) — 항목별 가중
 ```json
