@@ -25,12 +25,12 @@ LLM 분석을 수행하고 강의력 스코어와 개선 코칭이 담긴 리포
 |---|---|
 | 텍스트 전처리 | STT 스크립트 정제, 발화 단위 분할(미완성 어미 병합 포함), 화자 매핑 |
 | 개요 추출 | 메타 없이 **스크립트에서** 키워드·주제 아웃라인 직접 추출 → 정제 전역 맥락 |
-| 임베딩 토픽 분할 | KURE 임베딩 기반 TextTiling-lite로 주제 단위 청킹(LLM 분할은 fallback) |
-| eval_tags 태깅 | 청킹 호출에 folding — 각 chunk에 관련 평가항목을 다중 라벨로 미리 부착 |
-| 항목별 LLM 분석 | 18항목을 4갈래(지표/위치/검색/전역)로 라우팅, 관련 청크만 투입 |
-| 강의력 스코어링 | **항목별 가중**(PDF 근거) → 종합 강의력 스코어 |
-| 강사 비교·시계열 | 강사·과목별 비교, 주차별 추이 시각화 |
-| 리포트 생성 | 비개발자도 이해 가능한 리포트 자동 출력(PDF/DOCX/대시보드) |
+| 임베딩 토픽 분할 | 임베딩(Upstage API / KURE) 기반 TextTiling-lite 청킹(LLM 분할은 fallback) |
+| eval_tags 태깅 | 청킹 호출에 folding — 각 chunk에 **항목당 top-k** 검색으로 관련 평가항목 다중 라벨 부착 |
+| 항목별 LLM 분석 | 18항목을 4갈래(지표/위치/검색/전역) 라우팅 + 관련 청크만 투입 + self-consistency 다수결 |
+| 강의력 스코어링 | **항목별 가중**(높음3/중간2/낮음1) → 카테고리·종합 점수(0~100), 일자별 추이 |
+| 리포트 생성 | 강의별 **MD + PDF** 리포트(종합점수·강점/개선점·근거 인용). 대시보드는 스텁 |
+| 모델 백엔드 분기 | 정제·임베딩을 Upstage API / HF·KURE로 분기 — **GPU 없이 전체 로컬 실행** |
 
 ---
 
@@ -72,36 +72,39 @@ lecture-analyzer/
 │   │   ├── merge.py                       #     ②  화자매핑+발화병합(미완성 어미 병합) → merged.jsonl
 │   │   ├── loader.py                      #     (EDA용) STT → DataFrame
 │   │   └── text.py                        #     (EDA용·개요용) 토큰화·명사빈도·필러(KoNLPy)
-│   ├── refine/                            #   정제 (Step 3~5, 모델·Colab) — P1
+│   ├── refine/                            #   정제·청킹·태깅 (③~⑤ · Upstage API / Colab)
 │   │   ├── glossary.py                    #     ③  용어집(규칙치환+모델후보)
 │   │   ├── overview.py                    #     ③  개요 추출(키워드 KoNLPy + 주제 아웃라인) — §설계철학 A
 │   │   ├── sectionize.py                  #     ④a 블록→섹션 + 오버랩 윈도우(CTX/MAIN 태깅)
 │   │   ├── refine.py                      #     ④b Solar 정제(체크포인트/재개·CTX/MAIN)
-│   │   ├── embedding.py                   #     KURE 임베딩 로더 + 코사인(분할·태깅 공용)
+│   │   ├── embedding.py                   #     임베딩 백엔드(Upstage API / KURE) + 코사인
 │   │   ├── segment.py                     #     ⑤  임베딩 토픽 분할(TextTiling-lite)
-│   │   ├── tagging.py                     #     ⑤  eval_tags 태깅(시드키워드+임베딩 유사도)
+│   │   ├── tagging.py                     #     ⑤  eval_tags 태깅(항목당 top-k 검색·dense+cue)
 │   │   ├── chunk_embed.py                 #     ⑤  clean→chunks(임베딩 분할+태깅 folding) ★메인
 │   │   ├── chunk.py                       #     ⑤  LLM 청킹(fallback)
 │   │   ├── prompts.py / jsonout.py        #     프롬프트 / 모델출력 JSON 파싱
-│   │   └── model.py                       #     Solar-10.7B 로더/generate_fn
-│   ├── analyze/                           #   분석 엔진 (P2) — 18항목 4갈래 라우팅 평가
+│   │   └── model.py                       #     Solar generate_fn — Upstage API / HF 백엔드 분기
+│   ├── analyze/                           #   분석 엔진 ✅ — 18항목 4갈래 라우팅 평가
 │   │   ├── checklist.py                   #     18항목 정의(진실원천·weight·eval_type·seed_keywords)
-│   │   ├── metrics.py 🚧                  #     지표 선계산(pace·filler·존반말·미완결)
-│   │   ├── router.py 🚧                   #     항목→입력 선별 + eval_type 디스패치
-│   │   ├── context_expand.py 🚧          #     raw_ref 인접 블록 확장(풀버전 문맥확장)
-│   │   ├── prompts.py / engine.py         #     유형별 프롬프트 / chunks→analysis.jsonl
-│   ├── scoring/                           #   스코어링·검증 (P3)
-│   │   ├── scoring.py                     #     항목별 가중 → 종합점수
-│   │   └── evaluate.py                    #     메타데이터(정답) 기반 검증
-│   ├── report/                            #   리포트·대시보드 (P4)
-│   │   ├── build.py                       #     강의별 리포트(MD→PDF/DOCX)
-│   │   └── dashboard.py                   #     Streamlit 대시보드 스텁
+│   │   ├── metrics.py                     #     ⑥ 지표 선계산(pace·filler·존반말·미완결)
+│   │   ├── prompts.py                     #     ⑥ 유형별 judge 프롬프트(local/global)
+│   │   └── engine.py                      #     ⑥ 4갈래 라우팅 + 문맥확장 + self-consistency + 체크포인트
+│   ├── scoring/                           #   스코어링·검증
+│   │   ├── scoring.py                     #     ⑦ 항목별 가중 → 카테고리·종합점수(0~100)
+│   │   └── evaluate.py                    #     메타데이터(정답) 기반 검증 🚧
+│   ├── report/                            #   리포트·대시보드
+│   │   ├── build.py                       #     ⑧ 강의별 MD 리포트(종합점수·강점/개선점·근거)
+│   │   ├── pdf.py                         #     ⑧ MD→PDF(reportlab + 한글폰트 자동탐색)
+│   │   └── dashboard.py                   #     Streamlit 대시보드 스텁 🚧
 │   └── eda/report.py                      #   EDA 통계·차트·리포트 엔진
-├── scripts/
-│   ├── run_preprocess.py                  # ①~② 실행(로컬, GPU 불필요)
-│   ├── run_eda.py                         # EDA 리포트 실행
-│   ├── smoke_refine.py                    # ③~④ 배관 스모크(모델 stub)
-│   └── smoke_chunk_embed.py              # ⑤ 임베딩 청킹·태깅·개요 배관 스모크(임베더 stub)
+├── scripts/                               # 로컬 러너 + 스모크(배관 검증)
+│   ├── run_preprocess.py                  # ①② raw/merged 생성(로컬·GPU 불필요)
+│   ├── run_refine_local.py               # ③④⑤ 정제·청킹·태깅(Upstage) → clean/chunks
+│   ├── run_analyze_local.py              # ⑥ 4갈래 채점(--self-consistency) → analysis
+│   ├── run_score_local.py                # ⑦ 항목가중 종합점수 → scores
+│   ├── run_report_local.py               # ⑧ 리포트 MD(+--pdf)
+│   ├── run_eda.py                         # EDA 리포트
+│   └── smoke_*.py                         # refine·chunk_embed·analyze·score·report 배관 스모크
 ├── notebooks/
 │   ├── 01_eda.ipynb                       # 인터랙티브 EDA
 │   └── 02_refine_colab.ipynb             # Colab(A100): ③~⑤ 정제·청킹·태깅 파이프라인
@@ -241,11 +244,11 @@ flowchart TD
 | ① 파싱 | 규칙 | txt → `raw.jsonl` | 로컬 | ✅ |
 | ②a 화자 매핑 | 규칙 | raw → `speaker_map.json` | 로컬 | ✅ |
 | ②b 발화 병합 | 규칙 | raw(+맵) → `merged.jsonl` | 로컬 | ✅ + 미완성 어미 |
-| ③ 용어집 | 모델 | merged → `glossary.json` | Colab | ✅ |
-| ③ 개요 추출 | 규칙+모델 | merged → `overview.json` | Colab | ✅ (refine 배선 TODO) |
-| ④a 섹션화 | 규칙 | merged → 섹션(+오버랩 CTX/MAIN) | Colab | ✅ |
-| ④b 정제 | 모델(Solar) | 섹션+용어집(+개요) → `clean.jsonl` | Colab | ✅ (개요 주입 TODO) |
-| ⑤ 임베딩 청킹+태깅 | 임베딩 | clean → `chunks.jsonl`(eval_tags) | Colab | ✅ |
+| ③ 용어집 | 모델 | merged → `glossary.json` | 로컬/Colab | ✅ |
+| ③ 개요 추출 | 규칙+모델 | merged → 개요(정제에 주입) | 로컬/Colab | ✅ 배선됨 |
+| ④a 섹션화 | 규칙 | merged → 섹션(+오버랩 CTX/MAIN) | 로컬/Colab | ✅ |
+| ④b 정제 | 모델(Solar) | 섹션+용어집+개요 → `clean.jsonl` | 로컬/Colab | ✅ |
+| ⑤ 임베딩 청킹+태깅 | 임베딩 | clean → `chunks.jsonl`(eval_tags) | 로컬/Colab | ✅ top-k |
 | ⑥ 분석 | 모델 | chunks → `analysis.jsonl` | 로컬/Colab | ✅ 4갈래 라우팅 |
 | ⑦ 스코어링 | 규칙 | analysis → `scores.json` | 로컬 | ✅ 항목가중 |
 | ⑧ 리포트 | 규칙 | scores → 강의별 MD 리포트 | 로컬 | ✅ (대시보드 🚧) |
@@ -302,36 +305,49 @@ flowchart TD
 - 출력: `chunks.jsonl` `{chunk_id, lecture_id, pos, clean_text, raw_ref, time_range, eval_tags[]}` — **분석부(⑥) 입력**.
 - LLM 청킹([chunk.py](src/refine/chunk.py))은 **fallback**(임베딩 불가 환경). `topic` 라벨 사용.
 
-**⑥ 분석 (모델 · Colab)** — [src/analyze/engine.py](src/analyze/engine.py) *(P2)*
-- 강의(=`lecture_id`) 단위로 18항목을 **`eval_type`에 따라 4갈래 라우팅**해 평가 → 항목별 `{score 1~5, verdict, evidence[{chunk_id, quote}], comment}`. 체크포인트/재개.
-- 🟠 검색형은 **태깅된 청크만 + 풀버전 문맥확장**, 🔵 지표형은 **숫자 선계산 후 규칙 채점**, 🔴 전역형은 **압축 전역 뷰**. **상세 알고리즘·모듈 계획은 아래 「⚙️ ⑥ 분석 엔진 상세 로직」 섹션**.
+**⑥ 분석 (LLM · 로컬/Colab)** — [src/analyze/engine.py](src/analyze/engine.py) ✅
+- 강의(=`lecture_id`) 단위로 18항목을 **`eval_type` 4갈래 라우팅**해 평가 → 항목별 `{score 1~5, verdict, evidence[{chunk_id, quote}], metric, comment, routing}`. 체크포인트/재개.
+- 🟠 검색형 **태깅 top-k + 문맥확장**, 🔵 지표형 **숫자 선계산→규칙 채점**, 🔴 전역형 **압축 전역 뷰**, 🟢🟡 위치형 **도입/종료 청크**. **self-consistency**(다수결)로 판정 안정화. 상세는 아래 「⚙️ ⑥ 분석 엔진 상세 로직」.
 - 출력: `analysis.jsonl`(항목 1건=1행).
 
-**⑦ 스코어링 (규칙 · 로컬)** — [src/scoring/scoring.py](src/scoring/scoring.py) *(P3)*
-- **항목별 가중**(PDF 근거: 높음/중간/낮음) → 0~100 종합 강의력 점수. 강사/세션 비교, 주차 추이.
-- `evaluate.py`가 **메타데이터(정답)** 로 커버리지·정확도 검증(⚠️ 메타는 검증 전용, input 금지).
+**⑦ 스코어링 (규칙 · 로컬)** — [src/scoring/scoring.py](src/scoring/scoring.py) ✅
+- **항목별 가중**(높음3/중간2/낮음1) → 카테고리·종합 강의력 점수(0~100), N/A 제외, 일자별 추이. 카테고리 균등 ❌.
+- (계획) `evaluate.py`가 메타데이터(정답)로 커버리지·정확도 검증(⚠️ 메타는 검증 전용, input 금지).
 
-**⑧ 리포트/대시보드 (규칙 · 로컬)** — [src/report/](src/report/) *(P4)*
-- 강의별 리포트(MD→PDF/DOCX) + Streamlit 대시보드(점수·근거 인용 드릴다운).
+**⑧ 리포트 (규칙 · 로컬)** — [src/report/](src/report/) ✅
+- 강의별 **MD 리포트**(종합점수·카테고리표·강점/개선점·항목별 근거 인용) + **PDF 변환**([pdf.py](src/report/pdf.py), reportlab+한글폰트 자동탐색). Streamlit 대시보드는 스텁.
 
-### 실행
+### 실행 — 전체 로컬 파이프라인 ①~⑧ (Upstage 백엔드, GPU 불필요)
 
 ```bash
-# 로컬: ①~② (GPU 불필요)
-python -m scripts.run_preprocess     # raw.jsonl, merged.jsonl, speaker_map.json, manifest
-python -m scripts.smoke_refine       # (선택) ③~④ 배관 점검 — 모델 stub
-python -m scripts.smoke_chunk_embed  # (선택) ⑤ 임베딩 청킹·태깅·개요 배관 점검 — 임베더 stub
+# 전처리 ①②  (규칙·로컬)
+python -m scripts.run_preprocess                       # → raw/merged.jsonl, speaker_map
+
+# 정제·청킹·태깅 ③④⑤  (Upstage Solar+임베딩 · 키 필요 · 체크포인트/재개)
+python -m scripts.run_refine_local --file <강의>.txt   # → clean.jsonl, chunks.jsonl(eval_tags)
+
+# 분석 ⑥  (4갈래 LLM 채점 · self-consistency 옵션)
+python -m scripts.run_analyze_local --chunks outputs/processed/chunks.jsonl --self-consistency 3
+                                                       # → analysis.jsonl
+
+# 스코어링 ⑦  (규칙·항목가중)
+python -m scripts.run_score_local --analysis outputs/processed/analysis.jsonl   # → scores.json
+
+# 리포트 ⑧  (MD + PDF)
+python -m scripts.run_report_local --scores outputs/processed/scores.json --pdf # → reports/*.md,*.pdf
 ```
 
+- 각 러너는 `--file`/`--lecture`·`--dry-run`·`--fresh` 등 **비용 안전장치** 제공. ③④는 체크포인트/재개.
+- 배관만 점검(API 없이): `python -m scripts.smoke_{refine,chunk_embed,analyze,score,report}`.
+
+### (대안) Colab — GPU로 HF Solar / KURE
 ```
-# Colab: ③~⑤ (Solar 백엔드 선택 + KURE 임베딩)
-1. outputs/processed/merged.jsonl 을 Google Drive MyDrive/lecture-analyzer/ 에 업로드
-2. notebooks/02_refine_colab.ipynb 를 Colab에서 열고 백엔드 셀에서 BACKEND 선택
-   - upstage: GPU 불필요(키 입력) · hf: 런타임 A100
-3. 순서대로 실행. 산출물(clean.jsonl, chunks.jsonl)은 Drive에 1건씩 체크포인트 — 끊겨도 해당 셀만 재실행하면 재개
+1. merged.jsonl 을 Drive MyDrive/lecture-analyzer/ 에 업로드
+2. notebooks/02_refine_colab.ipynb 열고 백엔드 셀에서 BACKEND/EMBED 선택(upstage=키 / hf·kure=A100)
+3. 순서대로 실행 — 산출물은 Drive에 체크포인트(끊겨도 재개)
 ```
 
-> 코드는 repo에서, **데이터는 Drive에서**(분리). 데이터·정제 산출물은 git/공개 업로드 금지.
+> 코드는 repo에서, **데이터는 로컬/Drive에서**(분리). 데이터·정제 산출물은 git/공개 업로드 금지.
 
 ---
 
@@ -369,7 +385,7 @@ python -m scripts.smoke_chunk_embed  # (선택) ⑤ 임베딩 청킹·태깅·�
 대상: 개념정의·비유·강조·예시·실습·오류·이해확인·참여·질문응답.
 ```
 정제된 chunk(eval_tags 부착됨) ─┐
-   ├─(1) 태깅(⑤에서 이미 완료): 시드 키워드 OR 임베딩 유사도(>임계) → item별 관련 chunk
+   ├─(1) 태깅(⑤에서 이미 완료): 항목당 top-k 검색(dense 주신호 + cue 보조) → item별 관련 chunk
    ├─(2) 평가: 항목별 태깅된 top-k chunk만 LLM에 투입
    ├─(3) 부족하면 문맥 확장: raw_ref/시간 인접 블록 N개 추가 (최대 1~2회)
    └─(4) 관련 chunk 0개 = 부정 증거(강사가 안 함) → 낮은 점수 + 전역 1회 교차확인
@@ -388,7 +404,7 @@ python -m scripts.smoke_chunk_embed  # (선택) ⑤ 임베딩 청킹·태깅·�
 
 ---
 
-## ⚙️ ⑥ 분석 엔진 상세 로직 (4갈래 라우팅 · 구현 예정 P2)
+## ⚙️ ⑥ 분석 엔진 상세 로직 (4갈래 라우팅 · 구현 완료 ✅)
 
 §평가 설계의 4갈래를 **실행 가능한 알고리즘**으로 구체화한다. 핵심은 *항목마다 전체를 다시 읽지 않는다* — `eval_type`으로 라우팅해 **필요한 입력만** LLM에 넣는다.
 
@@ -463,20 +479,20 @@ def eval_local(item, chunks, blocks):
   "evidence": [{"chunk_id": 12, "quote": "마치 물을 따르는 것과 같습니다"}],
   "metric": null,                                   // metric 유형이면 {name, value}
   "comment": "근거 기반 한두 문장",
-  "routing": {"n_candidates": 3, "expanded": 0, "negative_evidence": false, "cross_checked": false} }
+  "routing": {"n_candidates": 3, "expanded": 0, "samples": 3, "negative_evidence": false, "cross_checked": false} }
 ```
 
-### 구현 모듈 계획 (P2 · 아직 코드 미작성)
+### 구현 모듈 ✅
 | 모듈 | 역할 |
 |---|---|
-| `src/analyze/metrics.py` 🚧 | 지표 선계산(pace·filler·존반말·미완결) — `merged`/`config.FILLER_WORDS` 재사용 |
-| `src/analyze/router.py` 🚧 | 항목→입력 선별 + `eval_type` 디스패치(local/position/global/metric) |
-| `src/analyze/context_expand.py` 🚧 | `raw_ref` 인접 원본 블록 확장(풀버전 (3)단계) |
-| `src/analyze/prompts.py` 🚧 | 유형별 프롬프트(local/position/global/metric-해석) + `needs_more` 플래그 |
-| `src/analyze/engine.py` 🚧 | `run_analysis` 루프 — 라우팅·확장·체크포인트/재개 |
+| `src/analyze/metrics.py` | 지표 선계산(pace·filler[토큰]·존댓말[clean 문장 기준]·미완결) + 지표형 규칙 채점 |
+| `src/analyze/prompts.py` | 유형별 judge 프롬프트(local/position·global) + 평이한 정의 인식·`needs_more` |
+| `src/analyze/engine.py` | `run_analysis` 루프 — 라우팅·문맥확장·self-consistency 집계·체크포인트/재개 |
 
-### config 추가 예정 (§2차 EDA로 캘리브레이션)
-`ANALYZE_TOP_K=4` · `ANALYZE_MAX_EXPAND=2` · `ANALYZE_EXPAND_BLOCKS=2` · `PACE_CPM_LOW/HIGH`(속도 컷) · `FILLER_RATE_HIGH`(필러 기준선) — 임계값은 2차 EDA 측정치로 확정.
+> 라우터·문맥확장은 별도 파일이 아니라 `engine.py` 안에 통합(`_eval_metric/_eval_retrieval/_eval_global` + `_judge`/`_aggregate`/`_neighbors`).
+
+### config 파라미터 (값은 §2차 EDA로 캘리브레이션)
+`ANALYZE_EVIDENCE_K`(=5, 항목당 근거 수) · `ANALYZE_MAX_EXPAND`(=1) · `ANALYZE_GLOBAL_SAMPLE`(=8) · `ANALYZE_SELF_CONSISTENCY`(=1, `--self-consistency N`으로 상향) · `ANALYZE_SC_TEMPERATURE`(=0.4) · `PACE_CPM_LOW/HIGH` · `FILLER_RATE_HIGH` — 지표 임계는 **잠정값**.
 
 ---
 
@@ -602,15 +618,15 @@ def eval_local(item, chunks, blocks):
 | LLM(정제·분석) | **Upstage Solar API**(기본) / Solar-10.7B HF(Colab GPU) — `config.MODEL_BACKEND` 분기 |
 | 임베딩 | **Upstage 임베딩 API**(기본) / KURE(`nlpai-lab/KURE-v1`·품질 1순위) — `config.EMBED_BACKEND` 분기 |
 | NLP | KoNLPy(Okt) · pandas |
-| 시각화 / 대시보드 | Streamlit / matplotlib |
-| 문서 생성 | ReportLab / python-docx |
+| 시각화 / 대시보드 | matplotlib(EDA) · Streamlit(스텁) |
+| 문서 생성 | ReportLab(PDF · 한글폰트 자동탐색) |
 
 ---
 
 ## 👥 팀 · 역할 분담
 
-> 규칙 기반 전처리(①②)는 완료·검증됨. 정제·청킹·태깅(③~⑤)은 베이스 구현 완료, 배선·튜닝 단계.
-> 단계 간 인터페이스(JSONL 계약)는 **[docs/SCHEMA.md](docs/SCHEMA.md)**.
+> 현재 ①~⑧ 전 단계가 **로컬 end-to-end 구현·검증 완료**(단일 강의 기준). 아래는 워크스트림 분담과 고도화 영역.
+> 단계 간 인터페이스(JSONL 계약)는 **[docs/SCHEMA.md](docs/SCHEMA.md)**. 백엔드 분기로 ③~⑥도 로컬(Upstage) 실행 가능.
 
 | 역할 | 워크스트림 | 실행 | 담당 폴더 | 입력 → 산출물 |
 |---|---|---|---|---|
@@ -619,7 +635,7 @@ def eval_local(item, chunks, blocks):
 | **P3** | 스코어링·검증 | 🟢 로컬 | `src/scoring/` | `analysis.jsonl` + 메타 → `scores.json` |
 | **P4** | 리포트·대시보드·인프라 | 🟢 로컬 | `src/report/` | `scores.json` → 리포트/대시보드 |
 
-**중간점검(2주차) 정렬**: 단일 강의 1편 end-to-end — P1 정제·청킹·태깅 → P2 18항목 4갈래 분석 → P3 점수 1건 → P4 리포트/시연.
+**중간점검 정렬 — 달성 ✅**: 단일 강의 1편 end-to-end(정제·청킹·태깅 → 18항목 4갈래 분석 → 종합점수 → MD/PDF 리포트)가 실데이터로 동작. 다음은 전체 강의 배치·지표 캘리브레이션·대시보드.
 
 ---
 
