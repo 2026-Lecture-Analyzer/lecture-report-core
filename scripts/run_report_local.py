@@ -20,15 +20,25 @@ def main() -> None:
     ap.add_argument("--scores", type=Path, default=config.PROCESSED_DIR / "scores.json")
     ap.add_argument("--analysis", type=Path, default=None, help="기본: <scores 폴더>/analysis.jsonl")
     ap.add_argument("--out", type=Path, default=None, help="기본: <scores 폴더>/reports/")
+    ap.add_argument("--pdf", action="store_true", help="MD 외에 PDF 도 생성(reportlab+한글폰트)")
     args = ap.parse_args()
     if not args.scores.exists():
         sys.exit(f"scores 없음: {args.scores} — 먼저 ⑦ 스코어링(run_score_local) 실행")
     analysis = args.analysis or (args.scores.parent / "analysis.jsonl")
     out = args.out or (args.scores.parent / "reports")
     r = build_all(args.scores, analysis, out)
-    print(f"[⑧ 리포트] {r['reports']}편 → {r['out_dir']}")
+    print(f"[⑧ 리포트 MD] {r['reports']}편 → {r['out_dir']}")
     for f in r["files"]:
         print("  -", f)
+    if args.pdf:
+        from src.report.pdf import build_all_pdf
+        rp = build_all_pdf(args.scores, analysis, out)
+        if rp.get("pdfs"):
+            print(f"[⑧ 리포트 PDF] {rp['pdfs']}편 (폰트 {rp['font']})")
+            for f in rp["files"]:
+                print("  -", f)
+        else:
+            print(f"[⑧ PDF] 생략 — {rp.get('skipped')}")
 
 
 if __name__ == "__main__":

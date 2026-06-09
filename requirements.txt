@@ -9,3 +9,5 @@ jupyter==1.1.1
 # Upstage Solar API 백엔드(GPU 불필요 → 로컬 정제 가능) + .env 자동 로드
 openai==2.41.0
 python-dotenv==1.2.2
+# 리포트 PDF 변환(⑧, 한글 TTF 필요 — macOS AppleGothic / Linux NanumGothic)
+reportlab==4.5.1

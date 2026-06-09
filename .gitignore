@@ -28,3 +28,7 @@ reports/
 .DS_Store
 .idea/
 .vscode/
+
+# ===== Claude Code (로컬 도구 설정 — 세션별 권한 노이즈) =====
+.claude/settings.json
+.claude/settings.local.json
