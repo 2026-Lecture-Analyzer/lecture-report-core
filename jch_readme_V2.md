@@ -91,7 +91,7 @@ total_score = Σ(norm × w) / Σ(w)          for all 18 items
 | ①② 전처리 | `raw.jsonl`, `merged.jsonl` | ✅ | 22,756발화 → 2,350블록 (전체 30강의) |
 | ③④⑤ 정제 | `clean.jsonl`(3), `chunks.jsonl`(6) | ✅ | 1강의 3섹션 · Upstage Solar/임베딩 |
 | ⑥ 분석 | `analysis.jsonl`(18행) | ✅ | 체크리스트 18항목 LLM 채점 · ~16회 호출 |
-| **⑦ 스코어링** | `scores.json` | **✅** | 종합 **36.1점** · LLM 없음 |
+| **⑦ 스코어링** | `scores.json` | **✅** | 종합 **48.9점** · LLM 없음 (공식: score/5*100) |
 | ⑧ 리포트 | `report_2026-02-02_오전.md/pdf` | ✅ | MD(10KB) + PDF(115KB) |
 
 **카테고리별 점수 (2026-02-02 오전, 3섹션 기준, 정규화 score/5*100):**
