@@ -3,17 +3,19 @@
 LLM 전에 숫자부터: 발화속도(pace)·필러율(filler)은 타임스탬프·원문에서 규칙으로 산출,
 LLM 은 해석/코멘트만(또는 규칙 채점). 전역 항목(언어일관성·완결성)도 여기 신호를 쓴다.
 
-⚠️ 필러율은 **정제 전 원문(merged.text)** 에서 측정한다 — 정제(④)가 군더더기를 이미
-지웠으므로 clean_text 로 재면 0에 가깝다.
+⚠️ C1 언어표현 신호(필러·존댓말 일관성)는 모두 **정제 전 원문(merged.text)** 에서
+측정한다 — 정제(④)가 군더더기·반말을 이미 지워 clean_text 로 재면 "깨끗함=만점"으로
+속는다(gold 검증: clean 존댓말비율 1.0 vs raw 0.53). docs/고도화/01 §7 참조.
 """
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 from src import config
 from src.preprocess.merge import is_incomplete
 
-# 존댓말/반말 — **정제 clean_text 의 문장(부호로 구분) 끝 어미**로 판정(신뢰 가능).
+# 존댓말/반말 — **원문(merged.text) 의 문장(부호로 구분) 끝 어미**로 판정.
 # 존댓말 검사(니다/요…)를 먼저 — '합니다'는 '다'로도 끝나므로 반말보다 우선 판정.
 _SENT_SPLIT = re.compile(r"[.!?]+|\n")
 _HON_END = re.compile(r"(니다|세요|십시오|[어아에예]요|[나까네지구군]요|잖아요|거든요|예요|요)$")
@@ -25,12 +27,12 @@ def _words(text: str) -> list[str]:
 
 
 def compute_metrics(blocks: list[dict], clean_text: str = "") -> dict:
-    """한 강의의 merged 블록(raw) + 정제 clean_text → 지표 dict.
+    """한 강의의 merged 블록(raw) → C1 언어표현 지표 dict.
 
-    filler·pace 는 raw(merged) 기준(정제가 군더더기를 지웠으므로). 존댓말 일관성은
-    문장부호가 있는 clean_text 기준(merged 는 문장중간 끊김). clean_text 없으면 0.
-    반환: {pace_cpm, pace_wpm, filler_rate, honorific_ratio, incomplete_ratio,
-           n_blocks, n_chars, elapsed_min}
+    필러·존댓말 일관성·완결성 모두 raw(merged.text) 기준 — 정제본은 결함을 지워 못 잰다.
+    (clean_text 인자는 하위호환용으로 남기되 사용하지 않는다.)
+    반환: {pace_cpm, pace_wpm, filler_rate, filler_n, max_filler_rate, top_filler,
+           honorific_ratio, incomplete_ratio, n_blocks, n_chars, elapsed_min}
     """
     if not blocks:
         return {}
@@ -51,12 +53,16 @@ def compute_metrics(blocks: list[dict], clean_text: str = "") -> dict:
     # 필러율(원문 기준) — **토큰 단위** 매칭(substring 아님). '요/네/음' 같은 1글자
     # 필러를 text.count 로 세면 어미의 '요' 까지 잡혀 폭증 → 어절(token) 일치로 카운트.
     filler_set = set(config.FILLER_WORDS)
-    filler_n = sum(1 for w in words if w in filler_set)
+    filler_counts = Counter(w for w in words if w in filler_set)
+    filler_n = sum(filler_counts.values())
     filler_rate = filler_n / max(n_words, 1)
+    # 지배 필러 — 가장 많이 반복된 단일 필러의 비중('특정 표현 과반복' 신호, 예: '이렇게')
+    top_filler, top_n = (filler_counts.most_common(1)[0] if filler_counts else (None, 0))
+    max_filler_rate = top_n / max(n_words, 1)
 
-    # 존댓말/반말 비율 — 정제 clean_text 문장 끝 어미 기준(신뢰 가능)
+    # 존댓말/반말 비율 — **원문(raw) 문장 끝 어미** 기준(정제본은 존댓말로 정규화돼 무의미)
     hon = cas = 0
-    for s in _SENT_SPLIT.split(clean_text or ""):
+    for s in _SENT_SPLIT.split(text):
         s = s.strip()
         if not s:
             continue
@@ -75,6 +81,8 @@ def compute_metrics(blocks: list[dict], clean_text: str = "") -> dict:
         "pace_wpm": round(pace_wpm, 1),
         "filler_rate": round(filler_rate, 4),
         "filler_n": filler_n,
+        "max_filler_rate": round(max_filler_rate, 4),
+        "top_filler": top_filler,
         "honorific_ratio": honorific_ratio,
         "incomplete_ratio": round(incomplete_ratio, 3),
         "n_blocks": len(blocks),
@@ -100,18 +108,23 @@ def score_metric_item(item_key: str, metrics: dict) -> dict:
         return {"score": score, "value": {"name": "pace_cpm", "value": cpm},
                 "comment": f"분당 {cpm}자 — {note} (잠정 기준 {lo}~{hi}, §2차 EDA 보정 예정)"}
 
-    if item_key == "C1_repetition":    # 불필요한 반복(필러)
+    if item_key == "C1_repetition":    # 불필요한 반복(필러·특정표현 과반복)
         rate = metrics.get("filler_rate", 0)
-        hi = config.FILLER_RATE_HIGH
-        if rate <= hi * 0.5:
-            score, note = 5, "필러 적음"
-        elif rate <= hi:
+        mx = metrics.get("max_filler_rate", 0)
+        top = metrics.get("top_filler")
+        hi, dom = config.FILLER_RATE_HIGH, config.FILLER_DOMINANT_HIGH
+        # 총 필러율 OR 지배 필러 둘 중 하나만 넘어도 '잦음' — 항목이 '특정 표현 과반복'을 봄
+        if rate > hi or mx > dom:
+            score, note = 2, f"필러·반복 잦음(최다 '{top}' {mx:.1%})"
+        elif rate > hi * 0.5:
             score, note = 3, "보통"
         else:
-            score, note = 2, "필러·반복 잦음"
-        return {"score": score, "value": {"name": "filler_rate", "value": rate},
-                "comment": f"필러율 {rate} ({metrics.get('filler_n')}회) — {note} "
-                           f"(잠정 기준 {hi}, §2차 EDA 보정 예정)"}
+            score, note = 5, "필러 적음"
+        return {"score": score, "value": {"name": "filler_rate", "value": rate,
+                                          "max_filler_rate": mx, "top_filler": top},
+                "comment": f"필러율 {rate} ({metrics.get('filler_n')}회), 최다 '{top}' "
+                           f"{metrics.get('max_filler_rate')} — {note} "
+                           f"(기준 율>{hi}|지배>{dom}, §2차 보정 대상)"}
 
     return {"score": None, "value": None, "comment": "지표 미정의"}
 
@@ -124,7 +137,7 @@ def score_global_metric_item(item_key: str, metrics: dict) -> dict | None:
     engine 의 global 평가에서 이 점수를 참고값으로 프롬프트에 넣거나, LLM 점수와
     혼합(예: 평균)해 전역 항목 점수를 안정화한다.
 
-    지표가 없으면(예: clean_text 부재로 honorific_ratio=None) None 을 반환해
+    지표가 없으면(예: 블록 부재로 honorific_ratio=None) None 을 반환해
     호출부가 LLM 단독 평가로 fallback 하게 한다.
 
     반환: {"score", "value", "comment"} 또는 None
