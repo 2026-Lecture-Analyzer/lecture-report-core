@@ -144,6 +144,8 @@ def _judge(messages, generate_fn, samples: int) -> dict:
 
 
 def _from_llm(data: dict) -> dict:
+    if isinstance(data, list):
+        data = data[0] if data else {}
     score = data.get("score")
     try:
         score = int(score) if score is not None else None

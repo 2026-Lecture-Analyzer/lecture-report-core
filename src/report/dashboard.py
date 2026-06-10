@@ -4,15 +4,17 @@
 """
 from __future__ import annotations
 
+import base64
 import html
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-import streamlit.components.v1 as components
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -166,42 +168,61 @@ def _highlight_component(
     chunks: list[dict],
     height: int = 600,
 ) -> None:
-    """항목 리스트(좌) + 원문 형광펜 하이라이트(우) 인터랙티브 뷰."""
+    """항목 리스트(좌, 카테고리 그룹) + 원문 형광펜 하이라이트(우) 인터랙티브 뷰.
 
+    hover: 근거 하이라이트 + 자동스크롤
+    click: 고정(pin) — 다시 클릭하면 해제
+    """
     chunk_map = {c["chunk_id"]: html.escape(c["clean_text"]) for c in chunks}
     chunk_ids_ordered = [c["chunk_id"] for c in chunks]
 
-    # 항목 행 HTML
-    items_html_parts: list[str] = []
+    # 카테고리별 그룹핑
+    by_cat: dict[str, list[dict]] = {c: [] for c in sorted(CATEGORIES)}
     for item in items_data:
-        score = item.get("score")
-        color = _item_color(score)
-        weight = _WEIGHT_LABEL.get(item.get("weight", ""), "")
-        verdict = html.escape((item.get("verdict") or "")[:40])
-        title = html.escape(item.get("title", ""))
-        cat = html.escape(item.get("category", ""))
-        dot_color = _CAT_COLORS.get(cat, "#94a3b8")
-        evidence = item.get("evidence", [])
-        quotes_json = json.dumps([e.get("quote", "") for e in evidence], ensure_ascii=False)
-        chunk_ids_json = json.dumps([e.get("chunk_id", -1) for e in evidence])
-        score_disp = str(score) if score is not None else "N/A"
+        by_cat[item["category"]].append(item)
 
+    items_html_parts: list[str] = []
+    for cat_key in sorted(CATEGORIES):
+        items_in_cat = by_cat.get(cat_key, [])
+        if not items_in_cat:
+            continue
+        cat_name = CATEGORIES[cat_key]
+        dot_color = _CAT_COLORS.get(cat_key, "#94a3b8")
+
+        # 카테고리 헤더
         items_html_parts.append(f"""
+        <div class="cat-header">
+          <span class="cat-dot" style="background:{dot_color}"></span>
+          <span>{cat_key} · {cat_name}</span>
+        </div>""")
+
+        for item in items_in_cat:
+            score = item.get("score")
+            color = _item_color(score)
+            weight = _WEIGHT_LABEL.get(item.get("weight", ""), "")
+            verdict = html.escape((item.get("verdict") or "")[:100])
+            title = html.escape(item.get("title", ""))
+            cat = item.get("category", "")
+            evidence = item.get("evidence", [])
+            quotes_json = json.dumps([e.get("quote", "") for e in evidence], ensure_ascii=False)
+            chunk_ids_json = json.dumps([e.get("chunk_id", -1) for e in evidence])
+            score_disp = str(score) if score is not None else "N/A"
+
+            items_html_parts.append(f"""
         <div class="item-row"
              data-quotes='{html.escape(quotes_json, quote=True)}'
              data-chunk-ids='{chunk_ids_json}'
              onmouseenter="onHover(this)"
-             onmouseleave="onLeave(this)">
+             onmouseleave="onLeave(this)"
+             onclick="onClick(this)">
           <div style="display:flex;justify-content:space-between;align-items:flex-start">
-            <div>
-              <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
-                           background:{dot_color};margin-right:6px;vertical-align:middle"></span>
-              <span class="item-title">{title}</span>
-              <span class="item-weight">{weight}</span>
-            </div>
+            <span class="item-title">{title}</span>
             <span class="item-score" style="color:{color}">{score_disp}점</span>
           </div>
-          {f'<div class="item-verdict">{verdict}</div>' if verdict else ''}
+          <div style="display:flex;align-items:center;gap:5px;margin-top:2px">
+            <span class="item-weight">{weight}</span>
+            {f'<span class="item-verdict">{verdict}</span>' if verdict else ''}
+          </div>
         </div>""")
 
     items_html = "\n".join(items_html_parts)
@@ -215,10 +236,9 @@ def _highlight_component(
             f' data-orig="{html.escape(text, quote=True)}">{text}</p>'
         )
     chunks_html = "\n".join(chunks_html_parts)
-
     chunk_map_json = json.dumps(chunk_map, ensure_ascii=False)
 
-    component_html = f"""<!DOCTYPE html>
+    raw_html = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -245,7 +265,7 @@ def _highlight_component(
     overflow-y: auto;
     background: #f8fafc;
     border-right: 1px solid #e2e8f0;
-    padding: 12px 10px;
+    padding: 10px 8px;
     flex-shrink: 0;
   }}
   .panel-label {{
@@ -256,14 +276,35 @@ def _highlight_component(
     text-transform: uppercase;
     padding: 0 4px 8px;
     border-bottom: 1px solid #e2e8f0;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
+  }}
+
+  /* 카테고리 헤더 */
+  .cat-header {{
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: #64748b;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    padding: 10px 8px 4px;
+    margin-top: 2px;
+  }}
+  .cat-dot {{
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }}
 
   .item-row {{
-    padding: 9px 10px;
+    padding: 8px 10px;
     border-radius: 8px;
-    margin-bottom: 4px;
-    cursor: default;
+    margin-bottom: 3px;
+    cursor: pointer;
     border: 1px solid transparent;
     transition: background .12s, border-color .12s, box-shadow .12s;
     user-select: none;
@@ -273,11 +314,17 @@ def _highlight_component(
     border-color: #c7d2fe;
     box-shadow: 0 1px 6px rgba(99,102,241,.12);
   }}
+  .item-row.pinned {{
+    background: #eff6ff;
+    border-color: #6366f1;
+    box-shadow: 0 1px 8px rgba(99,102,241,.22);
+  }}
   .item-title {{
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
     color: #1e293b;
-    vertical-align: middle;
+    flex: 1;
+    margin-right: 6px;
   }}
   .item-weight {{
     font-size: 10px;
@@ -285,8 +332,8 @@ def _highlight_component(
     background: #e2e8f0;
     border-radius: 4px;
     padding: 1px 5px;
-    margin-left: 5px;
-    vertical-align: middle;
+    white-space: nowrap;
+    flex-shrink: 0;
   }}
   .item-score {{
     font-size: 13px;
@@ -297,8 +344,7 @@ def _highlight_component(
   .item-verdict {{
     font-size: 11px;
     color: #64748b;
-    margin-top: 3px;
-    padding-left: 14px;
+    line-height: 1.4;
   }}
 
   /* ── 우측 원문 패널 ── */
@@ -339,7 +385,6 @@ def _highlight_component(
     -webkit-box-decoration-break: clone;
   }}
 
-  /* 스크롤바 */
   ::-webkit-scrollbar {{ width: 5px; }}
   ::-webkit-scrollbar-track {{ background: transparent; }}
   ::-webkit-scrollbar-thumb {{ background: #e2e8f0; border-radius: 4px; }}
@@ -350,7 +395,7 @@ def _highlight_component(
 
   <!-- 좌: 항목 리스트 -->
   <div class="items-panel">
-    <div class="panel-label">평가 항목 &nbsp;· hover</div>
+    <div class="panel-label">평가 항목 &nbsp;· hover / click 고정</div>
     {items_html}
   </div>
 
@@ -367,6 +412,7 @@ def _highlight_component(
 <script>
 const chunkMap = {chunk_map_json};
 let currentRow = null;
+let pinnedRow  = null;
 let leaveTimer = null;
 
 function escRe(s) {{
@@ -394,18 +440,12 @@ function resetChunks() {{
   document.getElementById('text-header').textContent = '강의 원문';
 }}
 
-function onHover(row) {{
-  clearTimeout(leaveTimer);
-  if (currentRow && currentRow !== row) currentRow.classList.remove('active');
-  currentRow = row;
-  row.classList.add('active');
-
+function applyRowHighlight(row) {{
   const quotes   = JSON.parse(row.dataset.quotes   || '[]');
   const chunkIds = JSON.parse(row.dataset.chunkIds || '[]');
   const relevant = new Set(chunkIds);
 
   resetChunks();
-
   if (quotes.length === 0) return;
 
   let scrolled = false;
@@ -424,10 +464,20 @@ function onHover(row) {{
   }});
 
   document.getElementById('text-header').textContent =
-    '근거 청크 ' + chunkIds.join(', ') + ' · 인용 ' + quotes.length + '건';
+    '근거 청크 ' + chunkIds.join(', ') + ' &nbsp;·&nbsp; 인용 ' + quotes.length + '건';
+}}
+
+function onHover(row) {{
+  if (pinnedRow && pinnedRow !== row) return;
+  clearTimeout(leaveTimer);
+  if (currentRow && currentRow !== row) currentRow.classList.remove('active');
+  currentRow = row;
+  row.classList.add('active');
+  applyRowHighlight(row);
 }}
 
 function onLeave(row) {{
+  if (pinnedRow === row) return;
   leaveTimer = setTimeout(() => {{
     if (currentRow === row) {{
       row.classList.remove('active');
@@ -436,11 +486,28 @@ function onLeave(row) {{
     }}
   }}, 400);
 }}
+
+function onClick(row) {{
+  if (pinnedRow === row) {{
+    pinnedRow = null;
+    row.classList.remove('pinned');
+  }} else {{
+    if (pinnedRow) pinnedRow.classList.remove('pinned');
+    pinnedRow = row;
+    row.classList.add('pinned');
+    clearTimeout(leaveTimer);
+    if (currentRow && currentRow !== row) currentRow.classList.remove('active');
+    currentRow = row;
+    row.classList.add('active');
+    applyRowHighlight(row);
+  }}
+}}
 </script>
 </body>
 </html>"""
 
-    components.html(component_html, height=height + 4, scrolling=False)
+    encoded = base64.b64encode(raw_html.encode("utf-8")).decode("ascii")
+    st.iframe(src=f"data:text/html;base64,{encoded}", height=height + 4)
 
 
 # ── 데이터 로드 ───────────────────────────────────────────────────────────
@@ -454,6 +521,25 @@ def load_data(
     if Path(chunks_path).exists():
         chunks = _load_jsonl(Path(chunks_path))
     return scores, analysis, chunks
+
+
+@st.cache_data
+def _get_pdf_bytes(lecture_id: str, scores_path: str, analysis_path: str) -> bytes | None:
+    from src.report.pdf import build_lecture_pdf, register_korean_font
+    font = register_korean_font()
+    if not font:
+        return None
+    scores_d = json.loads(Path(scores_path).read_text(encoding="utf-8"))
+    analysis_d = _load_jsonl(Path(analysis_path))
+    tmp = tempfile.mktemp(suffix=".pdf")
+    try:
+        build_lecture_pdf(lecture_id, scores_d, analysis_d, Path(tmp), font)
+        return Path(tmp).read_bytes()
+    except Exception:
+        return None
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 # ════════════════════════════════════════════════════════
@@ -496,6 +582,19 @@ with st.sidebar:
     if avg is not None:
         cb.metric("전체 평균", f"{avg:.1f}점")
 
+    st.divider()
+    pdf_bytes = _get_pdf_bytes(selected, str(sp), str(ap))
+    if pdf_bytes:
+        st.download_button(
+            label="📄 PDF 다운로드",
+            data=pdf_bytes,
+            file_name=f"report_{selected}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    else:
+        st.caption("한글 폰트 미설치로 PDF 생성 불가")
+
 
 # ── 데이터 준비 ───────────────────────────────────────────────────────────
 lec = scores["lectures"][selected]
@@ -508,7 +607,6 @@ total      = lec["total_score"]
 scored_items = [d for d in lec["items"] if d.get("norm") is not None]
 neg_count    = sum(1 for d in lec["items"] if d.get("negative"))
 
-# 이 강의 chunks만 필터
 lec_chunks = [c for c in all_chunks if c.get("lecture_id") == selected]
 
 
@@ -543,11 +641,11 @@ with tab_ov:
     with c_r:
         st.markdown("##### 카테고리별 점수")
         st.plotly_chart(_radar_fig(cat_keys, cat_values),
-                        use_container_width=True, config={"displayModeBar": False})
+                        width="stretch", config={"displayModeBar": False})
     with c_b:
         st.markdown("##### 카테고리 비교")
         st.plotly_chart(_bar_fig(cat_keys, cat_values),
-                        use_container_width=True, config={"displayModeBar": False})
+                        width="stretch", config={"displayModeBar": False})
 
     st.divider()
 
@@ -595,14 +693,34 @@ with tab_ov:
 # TAB 2 · 항목별 상세 + 원문 하이라이트
 # ════════════════════════════════════════════════════════
 with tab_items:
-    st.caption("항목 위에 마우스를 올리면 원문에서 평가 근거가 형광펜으로 표시됩니다.")
+    st.caption(
+        "항목 위에 **마우스를 올리면** 원문에서 평가 근거에 형광펜 표시 · "
+        "**클릭하면 고정** (다시 클릭하면 해제)"
+    )
+    st.markdown("")
+
+    # 전체 항목 요약 테이블
+    by_cat_map = by_category()
+    table_rows: list[dict] = []
+    for ck in sorted(CATEGORIES):
+        for item in by_cat_map[ck]:
+            r = rows_by_key.get(item["key"], {})
+            table_rows.append({
+                "카테고리": f"{ck} {CATEGORIES[ck]}",
+                "항목": item["title"],
+                "중요도": _WEIGHT_LABEL.get(item["weight"], ""),
+                "점수": r.get("score", "N/A"),
+                "판정": (r.get("verdict") or "")[:80],
+            })
+
+    with st.expander("📊 전체 18항목 요약", expanded=False):
+        st.dataframe(pd.DataFrame(table_rows), hide_index=True, width="stretch")
+
     st.markdown("")
 
     if not lec_chunks:
         st.warning("chunks.jsonl 이 없거나 이 강의의 청크를 찾지 못했습니다.")
     else:
-        # items_data 조립: 18항목 순서 유지
-        by_cat_map = by_category()
         items_data: list[dict] = []
         for ck in sorted(CATEGORIES):
             for item in by_cat_map[ck]:
@@ -643,7 +761,7 @@ with tab_trend:
             st.metric(d, f"{v}점")
     else:
         st.plotly_chart(_total_trend_fig(by_date_total),
-                        use_container_width=True, config={"displayModeBar": False})
+                        width="stretch", config={"displayModeBar": False})
 
     st.divider()
 
@@ -661,9 +779,9 @@ with tab_trend:
 
         df_trend = pd.DataFrame(rows_cat).set_index("날짜")
         st.plotly_chart(_cat_trend_fig(df_trend),
-                        use_container_width=True, config={"displayModeBar": False})
+                        width="stretch", config={"displayModeBar": False})
         st.markdown("")
-        st.dataframe(df_trend, use_container_width=True)
+        st.dataframe(df_trend, width="stretch")
 
 
 def main() -> None:
