@@ -51,12 +51,79 @@ def _styles(font: str):
     }
 
 
+_CAT_COLORS = {
+    "C1": "#6366f1", "C2": "#0ea5e9", "C3": "#10b981", "C4": "#f59e0b", "C5": "#ec4899",
+}
+
+
+def _kr_font_prop():
+    """시스템에서 찾은 한글 TTF로 matplotlib FontProperties 반환."""
+    from matplotlib.font_manager import FontProperties
+    for path, _ in _FONT_CANDIDATES:
+        if Path(path).exists():
+            return FontProperties(fname=path)
+    return FontProperties()  # fallback (글자 깨질 수 있음)
+
+
+def _radar_png(category_scores: dict, width_inches: float = 4.0, height_inches: float = 3.2) -> bytes:
+    """5개 카테고리 레이더 차트를 PNG bytes로 반환."""
+    import io
+    import math
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    cats = list(CATEGORIES.keys())          # ["C1","C2","C3","C4","C5"]
+    labels = [CATEGORIES[c] for c in cats]
+    values = [float(category_scores.get(c) or 0) for c in cats]
+
+    fp = _kr_font_prop()
+    N = len(cats)
+    angles = [2 * math.pi / N * i for i in range(N)] + [0]
+    values_plot = values + [values[0]]
+
+    fig, ax = plt.subplots(figsize=(width_inches, height_inches),
+                           subplot_kw={"polar": True})
+    ax.set_facecolor("#f8fafc")
+    fig.patch.set_facecolor("white")
+
+    # 그리드 원 (20 40 60 80 100)
+    ax.set_ylim(0, 100)
+    ax.set_yticks([20, 40, 60, 80, 100])
+    ax.set_yticklabels(["20", "40", "60", "80", "100"], fontsize=5.5, color="#94a3b8",
+                       fontproperties=fp)
+    ax.yaxis.set_tick_params(pad=1)
+
+    # 스포크
+    ax.set_xticks([2 * math.pi / N * i for i in range(N)])
+    ax.set_xticklabels(labels, fontsize=6.5, color="#334155", fontproperties=fp)
+
+    # 채우기 + 외곽선
+    fill_color = "#6366f1"
+    ax.fill(angles, values_plot, alpha=0.20, color=fill_color)
+    ax.plot(angles, values_plot, color=fill_color, linewidth=1.6)
+
+    # 점
+    for ang, val, c in zip(angles[:-1], values, cats):
+        ax.plot(ang, val, "o", color=_CAT_COLORS[c], markersize=5, zorder=5)
+
+    ax.spines["polar"].set_color("#cbd5e1")
+    ax.grid(color="#e2e8f0", linewidth=0.7)
+
+    plt.tight_layout(pad=0.3)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
 def build_lecture_pdf(lecture_id: str, scores: dict, analysis_rows: list[dict],
                       out_path: Path, font: str = "KR") -> str:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
-    from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer,
+    from reportlab.platypus import (Image, Paragraph, SimpleDocTemplate, Spacer,
                                     Table, TableStyle)
 
     lec = scores["lectures"][lecture_id]
@@ -83,6 +150,12 @@ def build_lecture_pdf(lecture_id: str, scores: dict, analysis_rows: list[dict],
         ("ALIGN", (1, 0), (1, -1), "CENTER"), ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
+    # 레이더 차트
+    import io
+    radar_bytes = _radar_png(lec["category_scores"])
+    flow.append(Image(io.BytesIO(radar_bytes), width=90 * mm, height=72 * mm))
+    flow.append(Spacer(1, 4))
+
     flow.append(tbl)
 
     scored = [d for d in lec["items"] if d.get("norm") is not None]
