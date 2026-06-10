@@ -29,3 +29,5 @@ reports/
 # ===== Claude Code (로컬 도구 설정 — 세션별 권한 노이즈) =====
 .claude/settings.json
 .claude/settings.local.json
+#===== 중간보고 git ignore 추가 =====
+docs/중간보고/**
