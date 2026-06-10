@@ -46,11 +46,17 @@ MERGE_GAP_SEC = 20.0
 MERGE_MAX_BLOCK_SEC = 150.0
 MERGE_MAX_BLOCK_CHARS = 2000
 
+# ── LLM 제공자 스위치 ──────────────────────────────────────────────────
+# .env 의 LLM_BACKEND 로 생성·임베딩 백엔드를 한 번에 전환(코드 수정 불필요):
+#   "upstage" : Upstage Solar API   (UPSTAGE_API_KEY)  — 현재 기본
+#   "google"  : Google Gemini API   (GOOGLE_API_KEY)   — 키 받으면 .env 한 줄로 전환
+# 생성/임베딩을 서로 다른 제공자로 섞으려면 .env 에 MODEL_BACKEND / EMBED_BACKEND 를 개별 지정.
+LLM_BACKEND = os.environ.get("LLM_BACKEND", "upstage")
+
 # ── 정제/모델(Step 3~5) 백엔드 ─────────────────────────────────────────
-# Solar 를 어디서 돌릴지 선택(둘 다 generate_fn(messages)->str 동일 인터페이스):
-#   "hf"      : HuggingFace 오픈모델(SOLAR-10.7B-Instruct) — Colab GPU 필요
-#   "upstage" : Upstage Solar API(클라우드) — UPSTAGE_API_KEY 필요, GPU 불필요(로컬 가능)
-MODEL_BACKEND = "upstage"
+# 모두 generate_fn(messages)->str 동일 인터페이스. 값: upstage | google | hf
+#   "hf" : HuggingFace 오픈모델(SOLAR-10.7B-Instruct) — Colab GPU 필요
+MODEL_BACKEND = os.environ.get("MODEL_BACKEND", LLM_BACKEND)
 
 # (hf 백엔드) HuggingFace 오픈모델
 MODEL_ID = "upstage/SOLAR-10.7B-Instruct-v1.0"
@@ -62,6 +68,10 @@ MODEL_REVISION = None
 # 엔드포인트·모델명은 Upstage 콘솔/문서 기준(바뀌면 여기만 수정).
 UPSTAGE_BASE_URL = "https://api.upstage.ai/v1"
 UPSTAGE_MODEL = "solar-pro2"   # 대안: solar-pro, solar-mini
+
+# (google 백엔드) Google Gemini API — google-genai SDK. 키는 .env 의 GOOGLE_API_KEY.
+# 모델명은 가이드 기준(바뀌면 여기만 수정). flash=속도·비용 균형, pro=고품질, flash-lite=대량·저비용.
+GOOGLE_MODEL = "gemini-2.5-flash"   # 대안: gemini-2.5-pro, gemini-2.5-flash-lite
 
 # 결정적 생성(재현성): 그리디/temperature=0 + 시드 고정.
 GEN_MAX_NEW_TOKENS = 1024
@@ -75,12 +85,18 @@ SECTION_MAX_CHARS = 2500
 CONTEXT_SUMMARY_MAX_CHARS = 400
 
 # ── 임베딩(태깅·청킹, Step 5 / §9) ─────────────────────────────────────
-# 백엔드 선택(둘 다 embed_fn(texts)->np.ndarray[n,d] 동일 인터페이스):
+# 백엔드 선택(모두 embed_fn(texts)->np.ndarray[n,d] L2정규화 동일 인터페이스):
 #   "kure"    : nlpai-lab/KURE-v1 (sentence-transformers) — 품질 1순위(§11), GPU 권장·CPU 가능, ~2GB 다운로드
 #   "upstage" : Upstage 임베딩 API — 다운로드·GPU 불필요(UPSTAGE_API_KEY). openai 패키지만 있으면 로컬 OK
-EMBED_BACKEND = "upstage"
+#   "google"  : Google Gemini 임베딩 API — 다운로드·GPU 불필요(GOOGLE_API_KEY). google-genai 패키지 필요
+# 기본은 LLM_BACKEND 따라감(google 키로 전환하면 임베딩도 함께 google).
+EMBED_BACKEND = os.environ.get("EMBED_BACKEND", LLM_BACKEND)
 EMBED_MODEL_ID = "nlpai-lab/KURE-v1"          # (kure) 대안: BAAI/bge-m3, BM-K/KoSimCSE-roberta
 UPSTAGE_EMBED_MODEL = "embedding-passage"     # (upstage) 대안: solar-embedding-1-large-passage
+GOOGLE_EMBED_MODEL = "gemini-embedding-001"   # (google) GA, 최대 3072차원
+GOOGLE_EMBED_DIM = None                        # None=모델 기본(3072). 축소하려면 정수(예: 1024)
+# ⚠ 태깅 floor(TAG_RETRIEVE_FLOOR=0.45 등)는 upstage 임베딩 분포 기준 캘리브레이션값.
+#   google 임베딩으로 바꾸면 유사도 분포가 달라 floor 재조정이 필요할 수 있음(§9 재캘리브레이션).
 # 임베딩 기반 토픽 분할(TextTiling-lite)
 SEG_DEPTH_C = 0.4        # 경계 임계: depth > mean + c*std
 SEG_MIN_SENTS = 3        # 청크 최소 문장 수
