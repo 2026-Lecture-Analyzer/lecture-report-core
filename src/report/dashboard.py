@@ -463,7 +463,7 @@ function applyRowHighlight(row) {{
     }}
   }});
 
-  document.getElementById('text-header').textContent =
+  document.getElementById('text-header').innerHTML =
     '근거 청크 ' + chunkIds.join(', ') + ' &nbsp;·&nbsp; 인용 ' + quotes.length + '건';
 }}
 
