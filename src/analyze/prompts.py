@@ -38,6 +38,43 @@ _JSON_SPEC = (
     '"comment": "근거 기반 한두 문장", "needs_more": false}'
 )
 
+# 항목별 추가 채점 기준 — 공통 _JUDGE_SYS 위에 얹는 항목 특화 가이드.
+# LLM 이 자주 틀리는 지점(단어만 보고 고득점, 무관 인용 등)을 항목별로 못박는다.
+ITEM_GUIDES = {
+    "C3_definition": (
+        "용어가 등장하는 것만으로 점수를 주지 마라. 그 용어의 '의미'를 풀어 설명한 "
+        "문장이 있어야 한다. 의미 설명 없이 용어만 반복되면 2점 이하."
+    ),
+    "C3_analogy": (
+        "비유·예시가 설명 중인 개념과 실제로 연결되는지 확인하라. '예를 들어' 뒤에 "
+        "개념과 무관한 내용이 오거나 단순 사실 나열이면 인정하지 않는다."
+    ),
+    "C4_error": (
+        "오류를 '언급'만 했는지, '원인+해결'까지 안내했는지 구분하라. 단어('에러','안 돼')만 "
+        "등장하고 후속 설명이 없으면 2점 이하. 원인과 해결책이 모두 있으면 4점 이상."
+    ),
+    "C5_check": (
+        "단순 추임새('자','네','그쵸')와 진짜 이해 확인 질문을 구분하라. 수강생 반응을 "
+        "기다리는 의도가 보여야 인정한다. 형식적 1~2회는 3점, 단락마다 짚으면 4점 이상."
+    ),
+    "C5_engage": (
+        "수강생이 '직접 행동'하도록 요청한 발화만 인정한다. 강사 혼자 시연하며 '해볼게요'는 "
+        "참여 유도가 아니다. '해보세요','같이 풀어볼까요'처럼 청자 행동 요청이어야 한다."
+    ),
+    "C5_answer": (
+        "강사가 질문을 받아 '실제로 응답·해소'했는지 본다. 질문을 던지기만 하고 답이 없으면 "
+        "낮게, 질문 유도 후 설명으로 해소하면 높게 평가한다."
+    ),
+    "C2_order": (
+        "주제 나열과 '개념→예시→실습' 흐름을 구분하라. 개념 제시 후 예시/실습으로 이어지는 "
+        "구조가 관찰되어야 한다. 순서가 뒤섞이면 점수를 낮춘다."
+    ),
+    "C3_prerequisite": (
+        "심화 내용 전에 선행 지식을 짚거나 연결('앞에서 배운','이미 아시다시피')하는지 본다. "
+        "선행 설명 없이 심화 용어가 갑자기 나오면 점수를 낮춘다."
+    ),
+}
+
 
 def _render_chunks(chunks: list[dict], extra_label: str = "") -> str:
     lines = []
@@ -52,11 +89,15 @@ def judge_prompt(item: dict, chunks: list[dict], context_chunks: list[dict] = No
     body = _render_chunks(chunks)
     ctx = ""
     if context_chunks:
-        ctx = ("\n[참고 문맥(채점 대상 아님, 경계 이해용)]\n"
+        ctx = ("\n[참고 문맥]\n"
+               "앞뒤 의미 연결을 판단하기 위한 문맥이다. "
+               "문맥 안에 실제 근거가 있으면 evidence 로 인용할 수 있다.\n"
                + _render_chunks(context_chunks, extra_label="ctx"))
+    guide = ITEM_GUIDES.get(item["key"], "")
     user = (
         f"[평가 항목] {CATEGORIES[item['category']]} > {item['title']}\n"
         f"[판정 기준] {item['description']}\n"
+        f"[항목별 추가 기준]\n{guide or '(없음)'}\n"
         f"[채점 척도] {_SCALE}\n\n"
         f"[강의 발췌]\n{body}{ctx}\n\n"
         f"위 항목을 채점하고 아래 JSON 으로만 답하라. evidence 의 chunk_id 는 발췌 번호.\n"
@@ -90,3 +131,37 @@ def global_prompt(item: dict, overview: dict, metrics: dict, sample_chunks: list
         f"종합 채점하고 아래 JSON 으로만 답하라.\n{_JSON_SPEC}"
     )
     return [{"role": "system", "content": _JUDGE_SYS}, {"role": "user", "content": user}]
+
+
+# ── 태그 0개 교차검증 ──────────────────────────────────────────────────
+# 태깅(키워드+임베딩)이 후보를 0개 잡았을 때, 곧장 '부재(1점)'로 단정하면
+# false negative 위험이 있다(태깅이 놓쳤을 뿐 실제로는 있을 수 있음).
+# 균등 샘플 몇 개를 LLM 에 보여주고 "정말 없는지" 한 번 더 확인한다.
+_CROSS_SYS = (
+    "너는 IT 강의 평가자다. 특정 평가 항목에 해당하는 내용이 아래 발췌에 "
+    "조금이라도 나타나는지만 판단한다. 키워드 검색이 놓쳤을 가능성을 고려해 "
+    "표현이 달라도 의미가 맞으면 '있음'으로 본다. 반드시 JSON 으로만 답한다."
+)
+
+_CROSS_JSON = (
+    '{"found": true/false, "score": 1~5 정수, '
+    '"verdict": "우수/양호/보통/미흡/없음 중 하나", '
+    '"evidence": [{"chunk_id": 정수, "quote": "발췌 원문 인용"}], '
+    '"comment": "한두 문장", "needs_more": false}'
+)
+
+
+def cross_check_prompt(item: dict, sample_chunks: list[dict]) -> list[dict]:
+    """태그 0개 항목의 교차검증. 샘플에서 항목 근거가 실제로 있는지 재확인."""
+    guide = ITEM_GUIDES.get(item["key"], "")
+    body = _render_chunks(sample_chunks)
+    user = (
+        f"[평가 항목] {CATEGORIES[item['category']]} > {item['title']}\n"
+        f"[판정 기준] {item['description']}\n"
+        f"[항목별 추가 기준]\n{guide or '(없음)'}\n\n"
+        f"[강의 샘플]\n{body}\n\n"
+        f"이 항목에 해당하는 내용이 위 샘플에 나타나는지 판단하라. "
+        f"있으면 found=true 와 함께 채점하고, 정말 없으면 found=false 로 답하라.\n"
+        f"{_CROSS_JSON}"
+    )
+    return [{"role": "system", "content": _CROSS_SYS}, {"role": "user", "content": user}]

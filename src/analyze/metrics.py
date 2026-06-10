@@ -114,3 +114,45 @@ def score_metric_item(item_key: str, metrics: dict) -> dict:
                            f"(잠정 기준 {hi}, §2차 EDA 보정 예정)"}
 
     return {"score": None, "value": None, "comment": "지표 미정의"}
+
+
+def score_global_metric_item(item_key: str, metrics: dict) -> dict | None:
+    """🔴 global 항목 중 지표로 직접 채점 가능한 것을 규칙 점수화(1~5).
+
+    C1_consistency(언어 일관성), C1_completeness(발화 완결성)는 honorific_ratio /
+    incomplete_ratio 라는 결정적 신호가 있어, LLM 판단의 닻(anchor)으로 쓸 수 있다.
+    engine 의 global 평가에서 이 점수를 참고값으로 프롬프트에 넣거나, LLM 점수와
+    혼합(예: 평균)해 전역 항목 점수를 안정화한다.
+
+    지표가 없으면(예: clean_text 부재로 honorific_ratio=None) None 을 반환해
+    호출부가 LLM 단독 평가로 fallback 하게 한다.
+
+    반환: {"score", "value", "comment"} 또는 None
+    """
+    if item_key == "C1_consistency":          # 언어 일관성 (존댓말 비율)
+        hr = metrics.get("honorific_ratio")
+        if hr is None:
+            return None
+        if hr >= 0.9:
+            score, note = 5, "대체로 일관"
+        elif hr >= 0.7:
+            score, note = 3, "다소 혼용"
+        else:
+            score, note = 2, "비일관(존댓말/반말 혼용 잦음)"
+        return {"score": score, "value": {"name": "honorific_ratio", "value": hr},
+                "comment": f"존댓말 비율 {hr} — {note} (1.0=완전 일관)"}
+
+    if item_key == "C1_completeness":         # 발화 완결성 (미완결 문장 비율)
+        ir = metrics.get("incomplete_ratio")
+        if ir is None:
+            return None
+        if ir < 0.1:
+            score, note = 5, "문장 완결성 우수"
+        elif ir < 0.25:
+            score, note = 4, "양호"
+        else:
+            score, note = 2, "미완결 문장 잦음"
+        return {"score": score, "value": {"name": "incomplete_ratio", "value": ir},
+                "comment": f"미완결 문장 비율 {ir} — {note} (낮을수록 완결)"}
+
+    return None
