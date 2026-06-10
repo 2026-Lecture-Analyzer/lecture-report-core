@@ -133,9 +133,19 @@ def _single_trace(data: dict) -> dict:
             "final_score": s, "agreement": 1.0 if s is not None else 0.0}
 
 
+def _as_dict(x) -> dict:
+    """extract_json 이 배열을 돌려줄 때(모델이 [{...}] 로 답) 첫 dict 로 정규화.
+
+    _aggregate/_single_trace 가 원소를 dict 로 가정하므로 list/None 은 여기서 흡수한다.
+    """
+    if isinstance(x, list):
+        x = next((e for e in x if isinstance(e, dict)), None)
+    return x if isinstance(x, dict) else {}
+
+
 def _judge(messages, generate_fn, samples: int) -> dict:
     """채점 LLM 호출. samples>1 이면 반복 후 다수결 집계."""
-    datas = [extract_json(generate_fn(messages)) or {} for _ in range(max(1, samples))]
+    datas = [_as_dict(extract_json(generate_fn(messages))) for _ in range(max(1, samples))]
     if samples > 1:
         return _aggregate(datas)
     out = dict(datas[0])
