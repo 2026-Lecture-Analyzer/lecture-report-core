@@ -76,6 +76,12 @@ def compute_metrics(blocks: list[dict], clean_text: str = "") -> dict:
     incomplete_n = sum(1 for b in blocks if is_incomplete(b.get("text", "")))
     incomplete_ratio = incomplete_n / max(len(blocks), 1)
 
+    # C5 상호작용 cue(raw 기준 — refine 가 지우는 구어체 신호). 10분당 빈도.
+    check_cue_n = sum(text.count(c) for c in config.C5_CHECK_CUES)
+    engage_cue_n = sum(text.count(c) for c in config.C5_ENGAGE_CUES)
+    check_per10 = check_cue_n / elapsed_min * 10
+    engage_per10 = engage_cue_n / elapsed_min * 10
+
     return {
         "pace_cpm": round(pace_cpm, 1),
         "pace_wpm": round(pace_wpm, 1),
@@ -85,10 +91,27 @@ def compute_metrics(blocks: list[dict], clean_text: str = "") -> dict:
         "top_filler": top_filler,
         "honorific_ratio": honorific_ratio,
         "incomplete_ratio": round(incomplete_ratio, 3),
+        "check_cue_n": check_cue_n,
+        "engage_cue_n": engage_cue_n,
+        "check_per10": round(check_per10, 2),
+        "engage_per10": round(engage_per10, 2),
         "n_blocks": len(blocks),
         "n_chars": n_chars,
         "elapsed_min": round(elapsed_min, 1),
     }
+
+
+def _band(rate: float, lo: float, mid: float, hi: float) -> int:
+    """10분당 빈도 → 1~5. 0=없음(1) · <lo 미흡(2) · [lo,mid] 보통(3) · (mid,hi] 자주(4) · >hi(5)."""
+    if rate <= 0:
+        return 1
+    if rate < lo:
+        return 2
+    if rate <= mid:
+        return 3
+    if rate <= hi:
+        return 4
+    return 5
 
 
 def score_metric_item(item_key: str, metrics: dict) -> dict:
@@ -125,6 +148,20 @@ def score_metric_item(item_key: str, metrics: dict) -> dict:
                 "comment": f"필러율 {rate} ({metrics.get('filler_n')}회), 최다 '{top}' "
                            f"{metrics.get('max_filler_rate')} — {note} "
                            f"(기준 율>{hi}|지배>{dom}, §2차 보정 대상)"}
+
+    if item_key == "C5_check":         # 이해 확인 질문 — raw cue 빈도(refine 가 지움)
+        r, n = metrics.get("check_per10", 0), metrics.get("check_cue_n", 0)
+        score = _band(r, *config.C5_CHECK_PER10)
+        return {"score": score, "value": {"name": "check_per10", "value": r, "n": n},
+                "comment": f"이해확인 표현 {n}회 ({r}/10분) — raw 기준 "
+                           f"(되셨어요·이해가죠·맞죠 등, gold 보정 잠정)"}
+
+    if item_key == "C5_engage":        # 참여 유도 — raw cue 빈도(refine 가 지움)
+        r, n = metrics.get("engage_per10", 0), metrics.get("engage_cue_n", 0)
+        score = _band(r, *config.C5_ENGAGE_PER10)
+        return {"score": score, "value": {"name": "engage_per10", "value": r, "n": n},
+                "comment": f"참여유도 표현 {n}회 ({r}/10분) — raw 기준 "
+                           f"(해보세요·같이·풀어보 등, gold 보정 잠정)"}
 
     return {"score": None, "value": None, "comment": "지표 미정의"}
 

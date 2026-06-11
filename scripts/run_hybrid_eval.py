@@ -30,7 +30,9 @@ from src.refine.model import make_solar_generate_fn  # noqa: E402
 from scripts.exp_holistic_eval import _lectures, evaluate_lecture  # noqa: E402
 
 # raw 메트릭으로 덮어쓸 결정적 항목 (나머지는 holistic 유지)
-METRIC_ITEMS = {"C1_repetition", "C3_pace", "C1_consistency", "C1_completeness"}
+# C1·pace = 정제본이 신호 지움(§8). C5_check/engage = 구어체 cue 를 정제가 지움(§9-2).
+METRIC_ITEMS = {"C1_repetition", "C3_pace", "C1_consistency", "C1_completeness",
+                "C5_check", "C5_engage"}
 
 
 def _metric_row(item_key: str, metrics: dict) -> dict | None:
