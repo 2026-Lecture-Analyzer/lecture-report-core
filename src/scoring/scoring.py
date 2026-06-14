@@ -2,7 +2,8 @@
 
 설계: **항목별 가중**(checklist.weight high3/mid2/low1)으로 종합.
   항목 score(0~5) → 0~100 정규화(score/5*100) → 항목 가중 평균.
-  N/A(score=None)은 0점으로 처리해 분모에 포함 — 1점(20%)과 구분됨.
+  N/A — score=None 또는 routing.negative_evidence=True 이면 0점으로 분모에 포함.
+  na=true, na_reason="null"|"negative"로 원인 구분. 1점(20%)과 명확히 구분됨.
 
 scores.json: {lectures:{lid:{date,session,category_scores,total_score,n_na,items}}, summary}
 """
@@ -40,18 +41,20 @@ def score_lecture(rows: list[dict]) -> dict:
         meta = items.get(key, {})
         s = r.get("score")
         w = WEIGHT_VALUE.get(meta.get("weight", "mid"), 2)
-        na = s is None
+        negative = bool(r.get("routing", {}).get("negative_evidence"))
+        na = s is None or negative  # negative_evidence=True → N/A 전환(score 무시)
         if na:
             n_na += 1
-        norm = _norm(0.0) if na else _norm(float(s))  # N/A → 0점으로 분모 포함
+        norm = _norm(0.0) if na else _norm(float(s))  # N/A/negative → 0점 분모 포함
         cat = r["category"]
         cat_v[cat] += norm * w
         cat_w[cat] += w
         tot_v += norm * w
         tot_w += w
+        na_reason = ("null" if s is None else "negative") if na else None
         detail.append({"item_key": key, "category": cat, "score": s,
                        "norm": round(norm, 1), "weight": w, "na": na,
-                       "negative": bool(r.get("routing", {}).get("negative_evidence"))})
+                       "na_reason": na_reason, "negative": negative})
 
     category_scores = {c: (round(cat_v[c] / cat_w[c], 1) if cat_w.get(c) else None)
                        for c in CATEGORIES}

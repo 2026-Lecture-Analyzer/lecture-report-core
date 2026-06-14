@@ -93,11 +93,15 @@ txt ─①─ raw.jsonl ─②─ merged.jsonl ─③④─ clean.jsonl ─⑤�
    "category_scores": {"C1": 85.7, "C2": 27.3, "C3": 27.5, "C4": 34.4, "C5": 8.3},
    "total_score": 33.9, "n_na": 0,
    "items": [{"item_key": "C1_repetition", "category": "C1", "score": 5,
-              "norm": 100.0, "weight": 3, "na": false, "negative": false}]}},
+              "norm": 100.0, "weight": 3, "na": false, "na_reason": null, "negative": false}]}},
  "summary": {"n_lectures": 2, "avg_total": 32.8, "by_date": {"2026-02-03": 32.8}}}
 ```
-- 점수 0~100 정규화: `score / 5 * 100` (score=0~5 척도). N/A(score=null)는 0점으로 분모에 **포함** — 1점(20%)과 구분됨. **항목별 가중**(`checklist.weight` high3/mid2/low1) 평균 — 카테고리 균등 ❌.
-- `n_na`: N/A(score=null) 항목 수. `items[].na`: N/A 여부(bool). `items[].negative`: 부정 증거 여부(별개 개념).
+- 점수 0~100 정규화: `score / 5 * 100` (score=0~5 척도). N/A는 0점으로 분모에 **포함** — 1점(20%)과 구분됨. **항목별 가중**(`checklist.weight` high3/mid2/low1) 평균 — 카테고리 균등 ❌.
+- `n_na`: N/A 항목 수(아래 두 조건 합산). `items[].na`: N/A 여부(bool) — 다음 중 하나면 true.
+  - `score=null`: LLM이 평가 불가 판정. `na_reason="null"`.
+  - `routing.negative_evidence=True`: 임베딩 후보 0개(발화 부재). score 값 무시, N/A로 전환. `na_reason="negative"`.
+- `items[].na_reason`: `"null"` | `"negative"` | `null`(na=false). N/A 원인 구분용.
+- `items[].negative`: `routing.negative_evidence` 원본 값 — `na`와 항상 일치하지 않음(na=false인데 negative=true 조합은 이제 발생하지 않음, 계약 상 `na=true`가 보장됨).
 - `summary.by_date`: 일자/주차별 평균(추이).
 
 ## reports/  (P4)

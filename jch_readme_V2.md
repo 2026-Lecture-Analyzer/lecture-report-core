@@ -2,7 +2,7 @@
 
 > **이 문서는** V2 파이프라인 중 스코어링 단계(⑦)의 **구현 로직·설계 근거·진단 결과**를 정리한 노트. 단일 강의 end-to-end 검증(2026-02-02 오전)에서 발견한 **C5 0.0점 원인 규명**과 후속 고도화 후보를 포함한다.
 
-NLP 과제 1 · pipeline/scoring/jch/v2 브랜치
+NLP 과제 1 · pipeline/scoring/jch/v3 브랜치
 
 ---
 
@@ -51,7 +51,14 @@ total_score = Σ(norm × w) / Σ(w)          for all 18 items
 
 ### N/A 처리
 
-`score=None` 항목은 **0점(0%)으로 처리해 분모에 포함**한다 — 1점(20%)과 명확히 구분된다. `items[].na=true`로 표시.
+다음 두 조건 중 하나라도 해당하면 **0점(0%)으로 처리해 분모에 포함**한다 — 1점(20%)과 명확히 구분된다.
+
+| 조건 | 의미 | `na_reason` |
+|---|---|---|
+| `score=None` | LLM이 평가 불가 판정 | `"null"` |
+| `routing.negative_evidence=True` | 임베딩 후보 0개 — 발화 부재(부정 증거) | `"negative"` |
+
+`items[].na=true`로 표시, `items[].na_reason`으로 원인 구분. LLM이 반환한 score 값은 무시된다.
 
 ---
 
@@ -91,25 +98,25 @@ total_score = Σ(norm × w) / Σ(w)          for all 18 items
 | ①② 전처리 | `raw.jsonl`, `merged.jsonl` | ✅ | 22,756발화 → 2,350블록 (전체 30강의) |
 | ③④⑤ 정제 | `clean.jsonl`(3), `chunks.jsonl`(6) | ✅ | 1강의 3섹션 · Upstage Solar/임베딩 |
 | ⑥ 분석 | `analysis.jsonl`(18행) | ✅ | 체크리스트 18항목 LLM 채점 · ~16회 호출 |
-| **⑦ 스코어링** | `scores.json` | **✅** | 종합 **48.9점** · LLM 없음 (공식: score/5*100) |
+| **⑦ 스코어링** | `scores.json` | **✅** | 종합 **46.7점** · LLM 없음 (공식: score/5*100, negative→N/A 전환 적용) |
 | ⑧ 리포트 | `report_2026-02-02_오전.md/pdf` | ✅ | MD(10KB) + PDF(115KB) |
 
-**카테고리별 점수 (2026-02-02 오전, 3섹션 기준, 정규화 score/5*100):**
+**카테고리별 점수 (2026-02-02 오전, 3섹션 기준, 정규화 score/5*100, negative→N/A 적용):**
 
 | 카테고리 | 점수 | 주요 항목 |
 |---|---|---|
 | C1 언어 표현 품질 | **100.0** | 반복표현·완결성·일관성 모두 5점(100%) |
-| C2 강의 도입·구조 | 47.3 | 복습연계 4점(80%), 목표안내 3점(60%), 순서·강조·요약 1점(20%) |
+| C2 강의 도입·구조 | 43.6 | 복습연계 4점(80%), 목표안내 3점(60%), 순서·요약 1점(20%), 강조 N/A(negative) |
 | C3 개념 설명 명확성 | 46.0 | 선행확인 4점(80%), 속도 3점(60%), 정의 2점(40%), 비유 1점(20%) |
 | C4 예시·실습 연계 | 42.5 | 예시 3점(60%), 실습 2점(40%), 오류대응 1점(20%) |
-| C5 수강생 상호작용 | **20.0** | 전 항목 1점(20%) → 원인 아래 §진단 참고 |
-| **종합** | **48.9** | |
+| C5 수강생 상호작용 | **13.3** | 이해확인·참여유도 1점(20%), 질문응답 N/A(negative→0%) → §진단 참고 |
+| **종합** | **46.7** | |
 
 ---
 
-## 🔍 C5 0.0 진단
+## 🔍 C5 진단
 
-### 판정: **버그 아님 — 표본 한계 + 부정증거 처리 정책 문제**
+### 판정: **버그 아님 — 표본 한계. negative_evidence→N/A 전환 적용 완료**
 
 환산 공식·가중치·항목 매핑은 모두 PDF와 일치한다. 문제는 `score=1`이 두 가지 상황을 구분하지 못한다는 점이다.
 
@@ -121,13 +128,13 @@ total_score = Σ(norm × w) / Σ(w)          for all 18 items
 | `C5_engage` | 1 | 0개 | 3개 | False | "발췌문 전체에서 직접 참여 유도 내용이 전혀 나타나지 않음" |
 | `C5_answer` | 1 | 0개 | **0개** | **True** | "강의에서 해당 항목 관련 발화가 검색되지 않음(부정 증거)" |
 
-**환산 추적 (현행 공식: score/5*100):**
+**환산 추적 (negative→N/A 전환 적용 후):**
 
 ```
 C5_check  : score=1 → norm=20.0% × w=3 = 60.0
 C5_engage : score=1 → norm=20.0% × w=3 = 60.0
-C5_answer : score=1 → norm=20.0% × w=3 = 60.0
-C5 카테고리: 180.0 / 9.0 = 20.0
+C5_answer : negative_evidence=True → na=True, norm=0.0% × w=3 = 0.0
+C5 카테고리: 120.0 / 9.0 = 13.3
 ```
 
 **원인 분석:**
@@ -136,14 +143,14 @@ C5 카테고리: 180.0 / 9.0 = 20.0
 - **`C5_answer`의 `negative_evidence=True`** — 임베딩 검색 후보 자체가 0개(`n_candidates=0`). 이는 "5점 척도 최하"가 아니라 "발화 부재로 판단 불가"에 가깝다. 현재 `score=1`은 이 두 상황을 구분하지 않는다.
 - **`C5_check`·`C5_engage`** — 후보(2~3개)가 있었으나 LLM이 "해당 없음" 판정. 강의 초반 구간 특성상 실제로 이해 확인·참여 유도 발화가 없었을 가능성이 높다.
 
-**종합점수 (현행 공식 기준):**
+**종합점수 비교:**
 
 | 처리 방식 | 종합점수 |
 |---|---|
-| 현행 (C5 모두 score=1, norm=20%) | 48.9점 |
-| C5 N/A 처리 시 (norm=0%) | **추후 재산정 필요** |
+| v2 — negative=True여도 score=1(20%) 유지 | 48.9점 |
+| **v3 — negative→N/A(0%) 무조건 전환** | **46.7점** |
 
-> N/A(0%)와 1점(20%)이 이제 구분된다. `negative_evidence` 기반 N/A 전환 여부가 여전히 핵심 설계 결정 사항이다.
+> negative→N/A 전환으로 C5_answer(0%)·C2_emphasis(0%)가 확정됐다. 전체 30강의 분석 시 C5 분포가 의미 있게 달라질 수 있음.
 
 ---
 
@@ -154,21 +161,17 @@ C5 카테고리: 180.0 / 9.0 = 20.0
 | **가중치** | 높음·중간·낮음 3단계 | `{high:3, mid:2, low:1}` · 항목가중 평균 | ✅ 일치 |
 | **환산 공식** | 0~5점 → 0~100% 선형 | `score/5*100` (N/A=0%) | ✅ 일치 |
 | **항목 매핑** | 5카테고리 18항목 | 18/18 일치 · C4_error C4 소속 정확 | ✅ 완전 일치 |
-| **N/A 처리** | N/A 항목은 계산 제외 | `score=None` → 0점으로 분모 포함, `na=true` 표시 | ⚠️ 부분 불일치 — `negative_evidence=True`여도 `score=1`로 처리됨 |
+| **N/A 처리** | N/A 항목은 계산 제외 | `score=None` 또는 `negative_evidence=True` → 0점으로 분모 포함, `na=true`·`na_reason` 표시 | ✅ 해결 — negative→N/A 무조건 전환 구현 완료 |
 
 ---
 
-## 🚧 고도화 후보 (미결정 · 추후 논의)
+## 🚧 고도화 후보
 
-### 1. `negative_evidence=True` → N/A 자동 전환 (**최우선 검토**)
+### 1. `negative_evidence=True` → N/A 전환 — ✅ **구현 완료** (v3, #14)
 
-검색 후보 자체가 0개인 항목(`n_candidates=0` + `negative_evidence=True`)은 "해당 발화 없음"이므로 `score=1`(최하) 대신 `score=None`(N/A)이 더 적합하다.
+`negative_evidence=True` 항목을 score 무관하게 N/A(na=true, norm=0%)로 무조건 전환한다. `na_reason="negative"`로 LLM N/A(`"null"`)와 구분.
 
-단, **조건 분기가 필요**하다:
-- **부분 분석일 때** (3섹션 등 표본 한정) → `negative_evidence=True`면 N/A 처리 (발화 부재 확정 불가)
-- **전체 강의 분석 완료 후** → `negative_evidence=True`면 "실제 부재"로 간주해 score=1 유지 가능
-
-이 분기를 위해 분석 시 전체 섹션 수 대비 처리 섹션 수를 `analysis.jsonl`에 기록하는 방안 검토.
+**한계 (향후 확장 가능):** 현재는 부분/전체 분석 구분 없이 무조건 전환한다. 전체 강의 분석 완료 시에는 "실제 부재"와 "표본 한계"를 구분해 조건부 전환으로 세분화할 수 있다 — 전처리 시 `analyzed_sections/total_sections` 기록이 선행 필요.
 
 ### 2. 전체 30강의 실행 — C5 분포 확인
 
@@ -188,3 +191,4 @@ C5 카테고리: 180.0 / 9.0 = 20.0
 | 파일 | 줄 | 문제 | 수정 |
 |---|---|---|---|
 | `scripts/run_refine_local.py:149` | manifest 기록 | `config.TAG_SIM_THRESHOLD` 없음 (`AttributeError`) | `config.TAG_RETRIEVE_FLOOR`로 교체 — `src/config.py` 상수명 변경 반영 |
+| `src/scoring/scoring.py` | `score_lecture()` | `negative_evidence=True`여도 `score=1(20%)`로 처리 — 발화 부재가 최하점과 구분 안 됨 | `na = s is None or negative` 로 전환, `na_reason` 필드 추가 (#14) |
