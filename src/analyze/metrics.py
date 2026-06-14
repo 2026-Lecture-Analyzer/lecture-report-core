@@ -26,13 +26,15 @@ def _words(text: str) -> list[str]:
     return re.findall(r"[가-힣A-Za-z0-9]+", text)
 
 
-def compute_metrics(blocks: list[dict], clean_text: str = "") -> dict:
+def compute_metrics(blocks: list[dict], clean_text: str = "",
+                    raw_texts: list[str] = None) -> dict:
     """한 강의의 merged 블록(raw) → C1 언어표현 지표 dict.
 
     필러·존댓말 일관성·완결성 모두 raw(merged.text) 기준 — 정제본은 결함을 지워 못 잰다.
+    raw_texts(정제 전 **발화 단위**, raw.jsonl) 가 주어지면 완결성을 발화 단위로 측정한다
+    — merged 블록은 gap 으로 합쳐져 끊김을 뭉개므로(gold 검증) 발화 단위가 더 정확.
     (clean_text 인자는 하위호환용으로 남기되 사용하지 않는다.)
-    반환: {pace_cpm, pace_wpm, filler_rate, filler_n, max_filler_rate, top_filler,
-           honorific_ratio, incomplete_ratio, n_blocks, n_chars, elapsed_min}
+    반환: {... incomplete_ratio, incomplete_ratio_utt, ...}
     """
     if not blocks:
         return {}
@@ -72,9 +74,14 @@ def compute_metrics(blocks: list[dict], clean_text: str = "") -> dict:
             cas += 1
     honorific_ratio = round(hon / max(hon + cas, 1), 3) if (hon + cas) else None
 
-    # 미완결 문장 비율 — 완결성 신호(블록 끝이 접속어미)
+    # 미완결 문장 비율 — 완결성 신호(끝이 접속어미). merged 블록 기준(하위호환).
     incomplete_n = sum(1 for b in blocks if is_incomplete(b.get("text", "")))
     incomplete_ratio = incomplete_n / max(len(blocks), 1)
+    # 발화 단위(raw.jsonl) — merged 는 끊김을 뭉개므로 발화 단위가 사람 판단에 더 부합(§완결성).
+    incomplete_ratio_utt = None
+    if raw_texts:
+        inc_u = sum(1 for t in raw_texts if is_incomplete(t or ""))
+        incomplete_ratio_utt = round(inc_u / max(len(raw_texts), 1), 3)
 
     # C5 상호작용 cue(raw 기준 — refine 가 지우는 구어체 신호). 10분당 빈도.
     check_cue_n = sum(text.count(c) for c in config.C5_CHECK_CUES)
@@ -91,6 +98,7 @@ def compute_metrics(blocks: list[dict], clean_text: str = "") -> dict:
         "top_filler": top_filler,
         "honorific_ratio": honorific_ratio,
         "incomplete_ratio": round(incomplete_ratio, 3),
+        "incomplete_ratio_utt": incomplete_ratio_utt,
         "check_cue_n": check_cue_n,
         "engage_cue_n": engage_cue_n,
         "check_per10": round(check_per10, 2),
@@ -192,8 +200,22 @@ def score_global_metric_item(item_key: str, metrics: dict) -> dict | None:
         return {"score": score, "value": {"name": "honorific_ratio", "value": hr},
                 "comment": f"존댓말 비율 {hr} — {note} (1.0=완전 일관)"}
 
-    if item_key == "C1_completeness":         # 발화 완결성 (미완결 문장 비율)
-        ir = metrics.get("incomplete_ratio")
+    if item_key == "C1_completeness":         # 발화 완결성 (미완결 비율)
+        # 발화 단위(raw.jsonl)가 있으면 우선 — merged 블록은 끊김을 뭉개 과대평가(gold: 둘 다 5→실제 3).
+        iu = metrics.get("incomplete_ratio_utt")
+        if iu is not None:
+            # gold(02-02 0.084·02-06 0.099 = 둘 다 3) 보정. 발화단위 분포 0.084~0.119.
+            if iu < 0.06:
+                score, note = 5, "문장 완결성 우수"
+            elif iu < 0.08:
+                score, note = 4, "양호"
+            elif iu < 0.115:
+                score, note = 3, "보통(일부 미완결)"
+            else:
+                score, note = 2, "미완결 잦음"
+            return {"score": score, "value": {"name": "incomplete_ratio_utt", "value": iu},
+                    "comment": f"발화 미완결 비율 {iu} — {note} (발화 단위, 낮을수록 완결)"}
+        ir = metrics.get("incomplete_ratio")    # 폴백: merged 블록 단위(구 기준)
         if ir is None:
             return None
         if ir < 0.1:
@@ -203,6 +225,6 @@ def score_global_metric_item(item_key: str, metrics: dict) -> dict | None:
         else:
             score, note = 2, "미완결 문장 잦음"
         return {"score": score, "value": {"name": "incomplete_ratio", "value": ir},
-                "comment": f"미완결 문장 비율 {ir} — {note} (낮을수록 완결)"}
+                "comment": f"미완결 문장 비율 {ir} — {note} (블록 단위)"}
 
     return None

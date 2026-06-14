@@ -56,6 +56,20 @@ def _merged_by(merged_path: Path, by_date: bool) -> dict[str, list[dict]]:
     return g
 
 
+def _raw_texts_by(raw_path: Path, by_date: bool) -> dict[str, list[str]]:
+    """raw.jsonl(정제 전 발화) → {lid: [발화텍스트]}. 완결성 발화단위 측정용."""
+    if not raw_path.exists():
+        return {}
+    g: dict[str, list[str]] = defaultdict(list)
+    for l in raw_path.open(encoding="utf-8"):
+        if not l.strip():
+            continue
+        u = json.loads(l)
+        lid = u["date"] if by_date else f"{u['date']}_{u['session']}"
+        g[lid].append(u.get("text", ""))
+    return g
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="⑥ 하이브리드 평가(raw 메트릭 + holistic)")
     ap.add_argument("--dir", type=Path, default=config.PROCESSED_DIR,
@@ -80,6 +94,10 @@ def main() -> None:
 
     lecs = _lectures(clean, by_date=args.by_date)
     merged_g = _merged_by(merged, args.by_date)
+    raw_path = args.dir / "raw.jsonl"
+    if not raw_path.exists():
+        raw_path = config.PROCESSED_DIR / "raw.jsonl"        # 전체 raw 폴백(완결성 발화단위)
+    raw_g = _raw_texts_by(raw_path, args.by_date)
 
     print("─" * 60)
     print(f"백엔드 : {args.backend or config.MODEL_BACKEND} · SC {args.self_consistency} · "
@@ -100,7 +118,7 @@ def main() -> None:
     with out.open("w", encoding="utf-8") as w:
         for lid, secs in lecs.items():
             rows = evaluate_lecture(lid, secs, generate_fn, args.self_consistency)
-            metrics = compute_metrics(merged_g.get(lid, []))
+            metrics = compute_metrics(merged_g.get(lid, []), raw_texts=raw_g.get(lid))
             n_over = 0
             for r in rows:
                 if r["item_key"] in METRIC_ITEMS and metrics:
