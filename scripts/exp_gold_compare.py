@@ -17,17 +17,26 @@ from pathlib import Path
 
 from src.analyze.checklist import CATEGORIES, CHECKLIST
 
-# 사람 채점(정답) — docs 의 02-02 강의 품질 평가 리포트 18항목(하루 전체).
-GOLD = {
-    "date": "2026-02-02",
-    "scores": {
+# 사람 채점(정답) 18항목(하루 전체). GOLDS[date] 로 등록, GOLD=기본(02-02, 하위호환).
+GOLDS = {
+    # docs 의 02-02 강의 품질 평가 리포트
+    "2026-02-02": {
         "C1_repetition": 2, "C1_completeness": 3, "C1_consistency": 2,
         "C2_objective": 5, "C2_review": 5, "C2_order": 4, "C2_emphasis": 4, "C2_summary": 2,
         "C3_definition": 4, "C3_analogy": 4, "C3_prerequisite": 4, "C3_pace": 3,
         "C4_example": 4, "C4_practice": 4, "C4_error": 4,
         "C5_check": 3, "C5_engage": 3, "C5_answer": 3,
     },
+    # gold #2 — docs/고도화/gold2_0206_초안_검토용.md 확정(검토자 승인 2026-06-14)
+    "2026-02-06": {
+        "C1_repetition": 2, "C1_completeness": 3, "C1_consistency": 2,
+        "C2_objective": 2, "C2_review": 3, "C2_order": 3, "C2_emphasis": 3, "C2_summary": 2,
+        "C3_definition": 4, "C3_analogy": 3, "C3_prerequisite": 3, "C3_pace": 3,
+        "C4_example": 4, "C4_practice": 4, "C4_error": 3,
+        "C5_check": 3, "C5_engage": 3, "C5_answer": 2,
+    },
 }
+GOLD = {"date": "2026-02-02", "scores": GOLDS["2026-02-02"]}  # 하위호환(다른 스크립트 import)
 
 
 def _day_avg(path: Path) -> dict[str, float]:
@@ -58,55 +67,48 @@ def _stats(gold: dict, pred: dict) -> dict:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="gold(사람) vs RAG·holistic 일치도")
+    ap = argparse.ArgumentParser(description="gold(사람) vs RAG·Holistic·Hybrid 일치도")
     ap.add_argument("--dir", type=Path, default=Path("outputs/processed/_gold_0202"))
+    ap.add_argument("--gold-date", default="2026-02-02", help=f"택1: {list(GOLDS)}")
     args = ap.parse_args()
+    if args.gold_date not in GOLDS:
+        raise SystemExit(f"gold 없음: {args.gold_date} (등록: {list(GOLDS)})")
 
-    gold = GOLD["scores"]
-    rag = _day_avg(args.dir / "analysis.jsonl")
-    hol = _day_avg(args.dir / "holistic_analysis.jsonl")
+    gold = GOLDS[args.gold_date]
+    preds = {"RAG": _day_avg(args.dir / "analysis.jsonl"),
+             "HOL": _day_avg(args.dir / "holistic_analysis.jsonl"),
+             "HYB": _day_avg(args.dir / "hybrid_analysis.jsonl")}
+    preds = {k: v for k, v in preds.items() if v}      # 존재하는 것만
 
-    print("=" * 76)
-    print(f"GOLD 검증 — {GOLD['date']} 사람 채점 vs RAG · Holistic (day 평균)")
-    print("=" * 76)
-    print(f"{'item':16} {'type':7} {'GOLD':>4} {'RAG':>5} {'HOL':>5}  {'|RAG-G|':>7} {'|HOL-G|':>7}  승")
-    print("-" * 76)
-    cat_g, cat_r, cat_h = defaultdict(list), defaultdict(list), defaultdict(list)
+    print("=" * 72)
+    print(f"GOLD 검증 — {args.gold_date} 사람 채점 vs {' · '.join(preds)} (day 평균)")
+    print("=" * 72)
+    hdr = "  ".join(f"{k:>4}" for k in preds)
+    print(f"{'item':16} {'GOLD':>4}  {hdr}")
+    print("-" * 72)
+    cat = {k: defaultdict(list) for k in ["GOLD", *preds]}
     for it in CHECKLIST:
-        k = it["key"]
-        g = gold[k]
-        r = rag.get(k)
-        h = hol.get(k)
-        er = abs(r - g) if r is not None else None
-        eh = abs(h - g) if h is not None else None
-        win = ""
-        if er is not None and eh is not None:
-            win = "HOL" if eh < er else ("RAG" if er < eh else "=")
-        rs = f"{r:.1f}" if r is not None else "-"
-        hs = f"{h:.1f}" if h is not None else "-"
-        ers = f"{er:.1f}" if er is not None else "-"
-        ehs = f"{eh:.1f}" if eh is not None else "-"
-        print(f"{k:16} {it['eval_type']:7} {g:>4} {rs:>5} {hs:>5}  {ers:>7} {ehs:>7}  {win}")
-        cat_g[it["category"]].append(g)
-        if r is not None:
-            cat_r[it["category"]].append(r)
-        if h is not None:
-            cat_h[it["category"]].append(h)
+        k = it["key"]; g = gold[k]
+        cells = "  ".join(f"{(preds[p].get(k)):.1f}".rjust(4) if preds[p].get(k) is not None
+                          else "   -" for p in preds)
+        print(f"{k:16} {g:>4}  {cells}")
+        cat["GOLD"][it["category"]].append(g)
+        for p in preds:
+            if preds[p].get(k) is not None:
+                cat[p][it["category"]].append(preds[p][k])
 
-    print("-" * 76)
-    print("[카테고리 합계]  (GOLD / RAG / HOL, 5점 만점×항목수)")
+    print("-" * 72)
+    print("[카테고리 합계]")
     for c in CATEGORIES:
-        g = sum(cat_g[c]); r = sum(cat_r[c]); h = sum(cat_h[c])
-        print(f"  {c} {CATEGORIES[c]:12} GOLD {g:>4.0f}  RAG {r:>5.1f}  HOL {h:>5.1f}")
+        cells = "  ".join(f"{p} {sum(cat[p][c]):>4.1f}" for p in preds)
+        print(f"  {c} {CATEGORIES[c]:12} GOLD {sum(cat['GOLD'][c]):>3.0f}  {cells}")
 
-    sr, sh = _stats(gold, rag), _stats(gold, hol)
-    print("=" * 76)
-    print(f"{'':16} {'MAE(낮을수록정확)':>16} {'방향일치(±1)':>14} {'편향':>8}")
-    print(f"{'RAG':16} {sr['mae']:>14.2f}   {sr['within1']}/{sr['n']} ({100*sr['within1']//sr['n']}%)  {sr['bias']:>+7.2f}")
-    print(f"{'Holistic':16} {sh['mae']:>14.2f}   {sh['within1']}/{sh['n']} ({100*sh['within1']//sh['n']}%)  {sh['bias']:>+7.2f}")
-    better = "Holistic" if sh["mae"] < sr["mae"] else "RAG"
-    print(f"→ gold 에 더 가까움: {better}  (MAE {min(sr['mae'],sh['mae']):.2f} vs {max(sr['mae'],sh['mae']):.2f})")
-    print("=" * 76)
+    print("=" * 72)
+    print(f"{'방식':10} {'MAE↓':>6} {'방향일치(±1)':>13} {'편향':>8}")
+    for p in preds:
+        s = _stats(gold, preds[p])
+        print(f"{p:10} {s['mae']:>6.2f}   {s['within1']}/{s['n']} ({100*s['within1']//s['n']}%)  {s['bias']:>+7.2f}")
+    print("=" * 72)
 
 
 if __name__ == "__main__":
