@@ -35,6 +35,31 @@ GOLDS = {
         "C4_example": 4, "C4_practice": 4, "C4_error": 3,
         "C5_check": 3, "C5_engage": 3, "C5_answer": 2,
     },
+    # gold #3~5 — docs/고도화/gold_evidence_*.md 증거 기반(2026-06-14). 변별 극단 강의.
+    # 02-23: 도입 명시적(목표·복습 5), 존댓말 최저 0.504
+    "2026-02-23": {
+        "C1_repetition": 2, "C1_completeness": 3, "C1_consistency": 2,
+        "C2_objective": 4, "C2_review": 5, "C2_order": 4, "C2_emphasis": 3, "C2_summary": 3,
+        "C3_definition": 4, "C3_analogy": 3, "C3_prerequisite": 4, "C3_pace": 3,
+        "C4_example": 4, "C4_practice": 4, "C4_error": 3,
+        "C5_check": 3, "C5_engage": 3, "C5_answer": 2,
+    },
+    # 02-25: 존댓말 최고 0.655(casual이 서술체 '했다/된다') → C1_consistency 3(변별 상단)
+    "2026-02-25": {
+        "C1_repetition": 2, "C1_completeness": 3, "C1_consistency": 3,
+        "C2_objective": 3, "C2_review": 4, "C2_order": 3, "C2_emphasis": 3, "C2_summary": 2,
+        "C3_definition": 4, "C3_analogy": 3, "C3_prerequisite": 4, "C3_pace": 3,
+        "C4_example": 4, "C4_practice": 3, "C4_error": 3,
+        "C5_check": 3, "C5_engage": 3, "C5_answer": 2,
+    },
+    # 02-26: cue 최저(이해확인 0.44/10분) → C5_check 2(변별 하단). 도입 명시적.
+    "2026-02-26": {
+        "C1_repetition": 2, "C1_completeness": 3, "C1_consistency": 2,
+        "C2_objective": 4, "C2_review": 5, "C2_order": 4, "C2_emphasis": 3, "C2_summary": 2,
+        "C3_definition": 4, "C3_analogy": 3, "C3_prerequisite": 4, "C3_pace": 3,
+        "C4_example": 4, "C4_practice": 3, "C4_error": 3,
+        "C5_check": 2, "C5_engage": 3, "C5_answer": 2,
+    },
 }
 GOLD = {"date": "2026-02-02", "scores": GOLDS["2026-02-02"]}  # 하위호환(다른 스크립트 import)
 
