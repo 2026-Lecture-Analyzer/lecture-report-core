@@ -1,14 +1,14 @@
 """⑥-하이브리드 — 스코프 인지 평가(gold 검증으로 확정된 라우팅).
 
-gold(02-02) 결과: C2~C4 는 holistic 이 사람 수준, C1 은 raw 메트릭이 정확(holistic·RAG 둘 다
-정제본에 속음). 그래서 항목별로 입력을 분기한다:
+gold(02-02) 결과: C2~C5 holistic 항목은 holistic 이 사람 수준, C1·발화속도는 raw
+메트릭이 정확(holistic·RAG 둘 다 정제본에 속음). 그래서 항목별로 입력을 분기한다:
 
-  • raw 메트릭(결정적, LLM 없음) : C1_repetition · C1_consistency · C1_completeness · C3_pace
-                                   · C5_check · C5_engage (정제가 cue 지움, §9-2)
-  • holistic(전체원문 1패스 LLM)  : 나머지 12항목(C2 구조 · C3 개념 · C4 실습 · C5_answer)
+  • raw 메트릭(결정적, LLM 없음) : C1_repetition · C1_completeness · C1_consistency · C4_pace
+  • holistic(전체원문 1패스 LLM)  : 나머지 14항목(C2 구조 · C3 개념 · C4_transition · C5 실습)
 
-설계 = holistic 로 18항목 채점 후, 결정적 6항목만 메트릭 점수로 **덮어쓰기**(reuse 최대).
+설계 = holistic 로 18항목 채점 후, 결정적 4항목만 메트릭 점수로 **덮어쓰기**(reuse 최대).
 출력은 analysis.jsonl 동일 스키마 → 같은 스코어러/리포트/대시보드 그대로.
+핵심 로직은 src/analyze/hybrid.run_hybrid_analysis 로 공통화(run_analyze_local 과 공유).
 
 사용법:
     python -m scripts.run_hybrid_eval --clean outputs/processed/clean.jsonl --self-consistency 3
@@ -17,7 +17,6 @@ gold(02-02) 결과: C2~C4 는 holistic 이 사람 수준, C1 은 raw 메트릭�
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -25,50 +24,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src import config  # noqa: E402
-from src.analyze.metrics import (compute_metrics, score_global_metric_item,  # noqa: E402
-                                 score_metric_item)
+from src.analyze.hybrid import METRIC_ITEMS, run_hybrid_analysis  # noqa: E402
 from src.refine.model import make_solar_generate_fn  # noqa: E402
-from scripts.exp_holistic_eval import _lectures, evaluate_lecture  # noqa: E402
-
-# raw 메트릭으로 덮어쓸 결정적 항목 (나머지는 holistic 유지)
-# C1·pace = 정제본이 신호 지움(§8). C5_check/engage = 구어체 cue 를 정제가 지움(§9-2).
-METRIC_ITEMS = {"C1_repetition", "C3_pace", "C1_consistency", "C1_completeness",
-                "C5_check", "C5_engage"}
-
-
-def _metric_row(item_key: str, metrics: dict) -> dict | None:
-    """item_key 의 raw 메트릭 채점 → {score, comment, metric}. 불가하면 None."""
-    m = score_metric_item(item_key, metrics)
-    if m["score"] is None:                       # global 지표형(C1_consistency/completeness)
-        m = score_global_metric_item(item_key, metrics)
-    if not m or m.get("score") is None:
-        return None
-    return {"score": m["score"], "comment": m["comment"], "metric": m["value"]}
-
-
-def _merged_by(merged_path: Path, by_date: bool) -> dict[str, list[dict]]:
-    if not merged_path.exists():
-        return {}
-    blocks = [json.loads(l) for l in merged_path.open(encoding="utf-8") if l.strip()]
-    g: dict[str, list[dict]] = defaultdict(list)
-    for b in blocks:
-        lid = b["date"] if by_date else f"{b['date']}_{b['session']}"
-        g[lid].append(b)
-    return g
-
-
-def _raw_texts_by(raw_path: Path, by_date: bool) -> dict[str, list[str]]:
-    """raw.jsonl(정제 전 발화) → {lid: [발화텍스트]}. 완결성 발화단위 측정용."""
-    if not raw_path.exists():
-        return {}
-    g: dict[str, list[str]] = defaultdict(list)
-    for l in raw_path.open(encoding="utf-8"):
-        if not l.strip():
-            continue
-        u = json.loads(l)
-        lid = u["date"] if by_date else f"{u['date']}_{u['session']}"
-        g[lid].append(u.get("text", ""))
-    return g
 
 
 def main() -> None:
@@ -77,6 +34,7 @@ def main() -> None:
                     help="clean/merged/출력 기본 폴더")
     ap.add_argument("--clean", type=Path, default=None)
     ap.add_argument("--merged", type=Path, default=None)
+    ap.add_argument("--raw", type=Path, default=None)
     ap.add_argument("--out", type=Path, default=None, help="기본 <dir>/hybrid_analysis.jsonl")
     ap.add_argument("--backend", default=None)
     ap.add_argument("--self-consistency", type=int, default=3)
@@ -89,16 +47,12 @@ def main() -> None:
     merged = args.merged or args.dir / "merged.jsonl"
     if not merged.exists():
         merged = config.PROCESSED_DIR / "merged.jsonl"      # 전체 merged 폴백
+    raw_path = args.raw or args.dir / "raw.jsonl"
+    if not raw_path.exists():
+        raw_path = config.PROCESSED_DIR / "raw.jsonl"        # 전체 raw 폴백(완결성 발화단위)
     out = args.out or args.dir / "hybrid_analysis.jsonl"
     if not clean.exists():
         sys.exit(f"clean 없음: {clean}")
-
-    lecs = _lectures(clean, by_date=args.by_date)
-    merged_g = _merged_by(merged, args.by_date)
-    raw_path = args.dir / "raw.jsonl"
-    if not raw_path.exists():
-        raw_path = config.PROCESSED_DIR / "raw.jsonl"        # 전체 raw 폴백(완결성 발화단위)
-    raw_g = _raw_texts_by(raw_path, args.by_date)
 
     print("─" * 60)
     print(f"백엔드 : {args.backend or config.MODEL_BACKEND} · SC {args.self_consistency} · "
@@ -114,30 +68,12 @@ def main() -> None:
     except RuntimeError as e:
         sys.exit(f"[키 오류] {e}")
 
-    out.parent.mkdir(parents=True, exist_ok=True)
-    all_rows = []
-    with out.open("w", encoding="utf-8") as w:
-        for lid, secs in lecs.items():
-            rows = evaluate_lecture(lid, secs, generate_fn, args.self_consistency,
-                                    backend=args.backend or config.MODEL_BACKEND)
-            metrics = compute_metrics(merged_g.get(lid, []), raw_texts=raw_g.get(lid))
-            n_over = 0
-            for r in rows:
-                if r["item_key"] in METRIC_ITEMS and metrics:
-                    mr = _metric_row(r["item_key"], metrics)
-                    if mr:
-                        r.update(score=mr["score"], comment=mr["comment"],
-                                 metric=mr["metric"], evidence=[], verdict="")
-                        r["routing"] = {"method": "raw_metric", "negative_evidence": False}
-                        r["scoring_trace"] = {"raw_scores": [mr["score"]],
-                                              "final_score": mr["score"], "agreement": 1.0}
-                        n_over += 1
-                w.write(json.dumps(r, ensure_ascii=False) + "\n")
-            all_rows += rows
-            scored = [r["score"] for r in rows if isinstance(r["score"], int)]
-            print(f"  {lid}: 18항목(메트릭 덮어쓰기 {n_over}) · 평균 "
-                  f"{round(sum(scored)/len(scored),2) if scored else 'NA'}")
-    print(f"[하이브리드] {len(all_rows)}행 → {out}")
+    res = run_hybrid_analysis(
+        clean_path=clean, merged_path=merged, raw_path=raw_path,
+        generate_fn=generate_fn, out_path=out, samples=args.self_consistency,
+        by_date=args.by_date, backend=args.backend)
+    all_rows = res["rows"]
+    print(f"[하이브리드] {res['n_rows']}행 → {res['output']}")
 
     if args.gold:
         from scripts.exp_gold_compare import GOLD, _stats
@@ -149,16 +85,27 @@ def main() -> None:
         pred = {k: sum(v) / len(v) for k, v in pred.items()}
         print("\n" + "=" * 60)
         print(f"GOLD({GOLD['date']}) 대조 — 하이브리드")
-        print(f"{'item':16} {'GOLD':>4} {'HYB':>5} {'|Δ|':>5}")
+        print("⚠ 신(新) 기준은 항목 구성이 달라졌다. 기존 gold 에 없는 신규 항목은 '(신규)'로")
+        print("  표시되며, MAE 는 gold·pred 공통 항목으로만 계산된다(전체 성능 지표로 쓰지 말 것).")
+        print(f"{'item':22} {'GOLD':>4} {'HYB':>5} {'|Δ|':>6}")
         for it in CHECKLIST:
-            g = GOLD["scores"][it["key"]]; p = pred.get(it["key"])
+            g = GOLD["scores"].get(it["key"])
+            p = pred.get(it["key"])
+            if g is None:                       # 신 기준에서 추가된 항목 — gold 미보유
+                print(f"{it['key']:22} {'-':>4} {p if p is None else f'{p:.1f}':>5} {'(신규)':>6}")
+                continue
             d = f"{abs(p-g):.1f}" if p is not None else "-"
-            print(f"{it['key']:16} {g:>4} {p if p is None else f'{p:.1f}':>5} {d:>5}")
-        s = _stats(GOLD["scores"], pred)
+            print(f"{it['key']:22} {g:>4} {p if p is None else f'{p:.1f}':>5} {d:>6}")
+        # 공통 항목만 추려 통계(구 gold 의 삭제 항목·신 항목 불일치로 인한 오류 방지)
+        common = {k for k in GOLD["scores"] if k in pred}
+        gold_c = {k: GOLD["scores"][k] for k in common}
+        pred_c = {k: pred[k] for k in common}
+        s = _stats(gold_c, pred_c)
         print("-" * 60)
         print(f"하이브리드 MAE {s['mae']:.2f} · 방향일치 {s['within1']}/{s['n']} "
-              f"({100*s['within1']//s['n']}%) · 편향 {s['bias']:+.2f}")
-        print("(참고 — RAG 1.47 / Holistic 1.00)")
+              f"({100*s['within1']//s['n'] if s['n'] else 0}%) · 편향 {s['bias']:+.2f} "
+              f"(공통 {len(common)}항목 한정)")
+        print("(주의 — 구 기준 RAG 1.47 / Holistic 1.00 수치와 직접 비교 불가)")
         print("=" * 60)
 
 
