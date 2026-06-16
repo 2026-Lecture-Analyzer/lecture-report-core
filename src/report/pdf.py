@@ -171,6 +171,20 @@ def build_lecture_pdf(lecture_id: str, scores: dict, analysis_rows: list[dict],
         flow.append(Paragraph(f"• <b>{escape(t)}</b> — {rows.get(d['item_key'], {}).get('score')}점: {cm}",
                               st["body"]))
 
+    # 청크 타임스탬프 맵 (PDF 근거 인용에 사용)
+    chunks_rows = _load_jsonl(out_path.parent.parent / "chunks.jsonl") if (
+        out_path.parent.parent / "chunks.jsonl"
+    ).exists() else []
+    chunk_time_map = {
+        c["chunk_id"]: f"{c.get('start_time', '')}-{c.get('end_time', '')}"
+        for c in chunks_rows if c.get("start_time") and c.get("lecture_id") == lecture_id
+    }
+
+    _eval_label = {
+        "metric": "[지표]", "local": "[검색]",
+        "global": "[전역]", "positional": "[위치]",
+    }
+
     flow.append(Paragraph("📋 항목별 상세 평가", st["h2"]))
     by_cat: dict[str, list[dict]] = {c: [] for c in CATEGORIES}
     for it in items.values():
@@ -179,16 +193,31 @@ def build_lecture_pdf(lecture_id: str, scores: dict, analysis_rows: list[dict],
         flow.append(Paragraph(f"<b>{c} · {escape(name)}</b>", st["item"]))
         for it in by_cat[c]:
             r = rows.get(it["key"], {})
+            elabel = _eval_label.get(r.get("eval_type", ""), "")
             flow.append(Paragraph(
-                f"• <b>{escape(it['title'])}</b> ({_WLABEL.get(it['weight'],'')}) — "
+                f"• <b>{escape(it['title'])}</b> ({_WLABEL.get(it['weight'],'')}) "
+                f"{escape(elabel)} — "
                 f"<b>{r.get('score')}점</b> {escape(r.get('verdict') or '')}", st["body"]))
             if r.get("metric"):
-                flow.append(Paragraph(f"지표: {r['metric']['name']} = {r['metric']['value']}", st["quote"]))
+                m = r["metric"]
+                mname = m.get("name", "")
+                mval  = m.get("value")
+                metric_parts = [f"{mname}={mval}"]
+                top = m.get("top_filler")
+                if top:
+                    metric_parts.append(f"최다 '{top}'")
+                n = m.get("n")
+                if n is not None:
+                    metric_parts.append(f"{n}회")
+                flow.append(Paragraph(f"지표: {' · '.join(metric_parts)}", st["quote"]))
             if r.get("comment"):
                 flow.append(Paragraph(escape(r["comment"]), st["quote"]))
             for ev in (r.get("evidence") or [])[:2]:
-                flow.append(Paragraph(f"“{escape(ev.get('quote', ''))}” (chunk {ev.get('chunk_id')})",
-                                      st["quote"]))
+                cid = ev.get("chunk_id")
+                tstr = f" ({chunk_time_map[cid]})" if cid in chunk_time_map else f" (chunk {cid})"
+                flow.append(Paragraph(
+                    "“" + escape(ev.get("quote", "")) + "”" + escape(tstr),
+                    st["quote"]))
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
