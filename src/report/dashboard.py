@@ -766,6 +766,30 @@ with tab_ov:
                 unsafe_allow_html=True,
             )
 
+    # 부정 증거 항목 — 근거 청크가 검색되지 않은 항목
+    neg_items = [d for d in lec["items"] if d.get("negative")]
+    if neg_items:
+        st.divider()
+        st.markdown("##### 🔍 강의에서 관찰되지 않은 항목")
+        st.caption("임베딩 검색에서 관련 청크를 찾지 못해 1점(없음)으로 자동 처리된 항목입니다.")
+        cols = st.columns(min(len(neg_items), 3))
+        for i, d in enumerate(neg_items):
+            meta = items_meta.get(d["item_key"], {})
+            cat  = meta.get("category", "")
+            dot  = _CAT_COLORS.get(cat, "#94a3b8")
+            cols[i % 3].markdown(
+                f"<div style='padding:10px 12px;border-radius:8px;border:1px solid #fecaca;"
+                f"background:#fff5f5;margin-bottom:8px'>"
+                f"<span style='display:inline-block;width:7px;height:7px;border-radius:50%;"
+                f"background:{dot};margin-right:6px;vertical-align:middle'></span>"
+                f"<span style='font-size:12px;font-weight:600;color:#1e293b'>"
+                f"{meta.get('title', d['item_key'])}</span>"
+                f"<br><span style='font-size:11px;color:#ef4444;margin-left:13px'>"
+                f"{cat} · 근거 미검색</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
 
 # ════════════════════════════════════════════════════════
 # TAB 2 · 항목별 상세 + 원문 하이라이트
