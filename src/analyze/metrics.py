@@ -129,7 +129,7 @@ def score_metric_item(item_key: str, metrics: dict) -> dict:
 
     반환: {"score", "value", "comment"}
     """
-    if item_key == "C3_pace":          # 발화 속도 적절성
+    if item_key == "C4_pace":          # 발화 속도 적절성 (신 기준: C3→C4 이동)
         cpm = metrics.get("pace_cpm", 0)
         lo, hi = config.PACE_CPM_LOW, config.PACE_CPM_HIGH
         if lo <= cpm <= hi:
@@ -159,6 +159,8 @@ def score_metric_item(item_key: str, metrics: dict) -> dict:
                            f"{metrics.get('max_filler_rate')} — {note} "
                            f"(기준 율>{hi}|지배>{dom}, §2차 보정 대상)"}
 
+    # ── [legacy] C5_check / C5_engage — 신(新) 기준에서 삭제된 항목 ──
+    # 신 기준 CHECKLIST·METRIC_ITEMS 에 없으므로 호출되지 않는다(구 기준 비교용으로만 보존).
     if item_key == "C5_check":         # 이해 확인 질문 — raw cue 빈도(refine 가 지움)
         r, n = metrics.get("check_per10", 0), metrics.get("check_cue_n", 0)
         score = _band(r, *config.C5_CHECK_PER10)

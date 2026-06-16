@@ -22,13 +22,15 @@ from src.analyze.prompts import cross_check_prompt, global_prompt, judge_prompt
 from src.refine.jsonout import extract_json
 
 # 항목별 문맥확장 정책 — needs_more 시 앞/뒤로 가져올 인접 청크 수.
-# 오류 대응(C4_error)은 해결책이 뒤에 오므로 after 를 넓게, 질문 응답(C5_answer)은
-# 질문이 앞·답이 뒤이므로 양쪽을, 정의(C3_definition)는 좁게 본다.
-# 미정의 항목은 _DEFAULT_CONTEXT 사용.
+# 코드 설명(C3_code_explanation)은 동작·결과가 뒤에 오므로 after 를 넓게,
+# 개념 연결(C3_concept_connection)·학습 전환(C4_transition)은 앞뒤 맥락을 함께,
+# 정의(C3_definition)는 좁게 본다. 미정의 항목은 _DEFAULT_CONTEXT 사용.
 CONTEXT_POLICY = {
-    "C4_error":       {"before": 1, "after": 3},
-    "C5_answer":      {"before": 2, "after": 2},
-    "C3_definition":  {"before": 1, "after": 1},
+    "C3_definition":         {"before": 1, "after": 1},
+    "C3_term_explanation":   {"before": 1, "after": 2},
+    "C3_concept_connection": {"before": 2, "after": 2},
+    "C3_code_explanation":   {"before": 1, "after": 3},
+    "C4_transition":         {"before": 2, "after": 2},
 }
 _DEFAULT_CONTEXT = {"before": 1, "after": 1}
 

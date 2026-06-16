@@ -1,8 +1,15 @@
 """강의 품질 평가 체크리스트 — 5개 카테고리 · 18개 항목 (분석 엔진의 진실원천).
 
-출처: 제공 데이터 `강의 품질 기준.pdf`(ver 2.0). 각 항목에 PDF의 **가중치**와,
-KYS 설계(§3, §9)에서 도출한 **평가 유형(eval_type)** · **시드 키워드(seed_keywords)** 를
-같이 박았다.
+출처: 제공 데이터 `new_강의 품질 기준.pdf`. 각 항목에 PDF의 **세부기준(description)**·
+**가중치(weight)** 를 그대로 반영하고, KYS 설계(§3, §9)에서 도출한 **평가 유형(eval_type)**·
+**시드 키워드(seed_keywords)** 를 같이 박았다.
+
+※ 신(新) 기준 변경점(구 기준 대비):
+    - 카테고리 재편: C2 강의 구조 · C4 진행 방식 · C5 실습 및 적용
+    - 삭제: 오류 대응 · 이해 확인 질문 · 참여 유도 · 질문 응답 충분성
+    - 추가: 용어 설명 충분성 · 개념 간 연결성 · 코드 설명 충실성 · 학습 전환 안내
+    - 이동: 발화 속도(C3→C4) · 예시 적절성/실습 연계(C4→C5)
+    - 가중치 변경(PDF): 전날 복습 연계 중간 · 설명 구조성 높음 · 선행 개념 확인 높음
 
 각 항목 필드:
     key          : 안정적 식별자(스키마/집계용, 변경 금지)
@@ -14,8 +21,7 @@ KYS 설계(§3, §9)에서 도출한 **평가 유형(eval_type)** · **시드 �
                    "metric" 지표계산 · "intro" 도입부 · "outro" 종료부
                    "local" 국소-분산(검색·태깅) · "global" 전역
     needs_student: 학생 발화가 있어야 평가 가능(없으면 N/A). 제공 데이터는 단일화자
-                   (config.SINGLE_SPEAKER)라 현재 전 항목 False — C5_answer는 강사의
-                   질문 유도·응답 상호작용 뉘앙스로 재해석해 평가한다.
+                   (config.SINGLE_SPEAKER)라 현재 전 항목 False.
     seed_keywords: 고정밀 cue. 태깅 검색에서 floor 구제(저sim 진짜 인스턴스 살림) +
                    랭킹 가산점. 동음이의·기술homonym(실행/오류/따라 등)은 넣지 않는다.
 """
@@ -23,119 +29,100 @@ from __future__ import annotations
 
 CATEGORIES = {
     "C1": "언어 표현 품질",
-    "C2": "강의 도입 및 구조",
+    "C2": "강의 구조",
     "C3": "개념 설명 명확성",
-    "C4": "예시 및 실습 연계",
-    "C5": "수강생 상호작용",
+    "C4": "진행 방식",
+    "C5": "실습 및 적용",
 }
 
 WEIGHT_VALUE = {"high": 3, "mid": 2, "low": 1}  # P3 가중 스코어링용
 
-# 18개 항목 (3+5+4+3+3)
+# 18개 항목 (3+5+6+2+2)
 CHECKLIST = [
     # ── C1 언어 표현 품질 ──
-    {"key": "C1_repetition", "category": "C1", "title": "불필요한 반복 표현",
-     "description": "동일 단어/문장 및 '이제','그래서' 등 특정 표현을 과도하게 반복하지 않는가.",
+    {"key": "C1_repetition", "category": "C1", "title": "반복 표현",
+     "description": ("동일 단어, 문장 또는 특정 접속어(예: '이제', '그래서')를 "
+                     "과도하게 반복하지 않는가."),
      "weight": "high", "eval_type": "metric", "needs_student": False,
      "seed_keywords": ["이제", "그래서", "그러면", "막", "뭐", "좀", "이렇게"]},
     {"key": "C1_completeness", "category": "C1", "title": "발화 완결성",
-     "description": "문장이 완결된 형태로 끝맺음되는가(중간에 끊기지 않는가).",
+     "description": "문장이 중간에 끊기지 않고 완결된 형태로 마무리되는가.",
      "weight": "mid", "eval_type": "global", "needs_student": False,
      "seed_keywords": []},
     {"key": "C1_consistency", "category": "C1", "title": "언어 일관성",
-     "description": "강의 전반에 걸쳐 존댓말/반말이 일관되게 사용되는가.",
+     "description": "존댓말/반말 등 화법이 강의 전반에 걸쳐 일관되게 유지되는가.",
      "weight": "mid", "eval_type": "global", "needs_student": False,
      "seed_keywords": []},
-    # ── C2 강의 도입 및 구조 ──
+    # ── C2 강의 구조 ──
     {"key": "C2_objective", "category": "C2", "title": "학습 목표 안내",
-     "description": "강의 시작 시 오늘의 학습 목표와 진행 순서를 명확히 안내하는가.",
+     "description": "강의 시작 시 오늘 학습할 내용, 목표, 진행 순서를 명확하게 안내하는가.",
      "weight": "high", "eval_type": "intro", "needs_student": False,
      "seed_keywords": ["오늘", "목표", "배울", "진행", "할 거", "하겠습니다"]},
     {"key": "C2_review", "category": "C2", "title": "전날 복습 연계",
-     "description": "이전 강의 내용을 간략히 복습하고 오늘 내용과 연결하는가.",
-     "weight": "high", "eval_type": "intro", "needs_student": False,
+     "description": ("이전 강의 내용을 간략히 복습하고 오늘 학습 내용과 자연스럽게 "
+                     "연결하는가."),
+     "weight": "mid", "eval_type": "intro", "needs_student": False,
      "seed_keywords": ["지난 시간", "저번", "복습", "어제", "앞에서", "지난번", "지난주"]},
-    {"key": "C2_order", "category": "C2", "title": "설명 순서",
-     "description": ("개념→예시→실습의 순서로 구조적으로 설명하는가. "
-                     "단순히 여러 주제를 나열하는 것이 아니라, 개념을 먼저 제시한 뒤 "
-                     "예시나 실습으로 이어지는 흐름이 관찰되어야 인정한다. "
-                     "순서가 뒤섞이거나 개념 없이 실습부터 들어가면 점수를 낮춘다."),
-     "weight": "mid", "eval_type": "global", "needs_student": False,
+    {"key": "C2_structure", "category": "C2", "title": "설명 구조성",
+     "description": ("개념, 예시, 실습 등이 체계적인 흐름으로 구성되어 이해하기 쉽게 "
+                     "전달되는가."),
+     "weight": "high", "eval_type": "global", "needs_student": False,
      "seed_keywords": []},
     {"key": "C2_emphasis", "category": "C2", "title": "핵심 내용 강조",
-     "description": "중요한 내용을 반복하거나 강조하여 전달하는가.",
+     "description": "중요한 개념이나 실무적으로 중요한 내용을 반복 또는 강조하여 전달하는가.",
      "weight": "mid", "eval_type": "local", "needs_student": False,
      "seed_keywords": ["중요", "꼭", "반드시", "핵심", "기억", "포인트"]},
     {"key": "C2_summary", "category": "C2", "title": "마무리 요약",
-     "description": "강의 마무리 시 핵심 내용을 요약 정리하는가.",
+     "description": "강의 종료 시 핵심 내용을 요약하고 정리하는가.",
      "weight": "low", "eval_type": "outro", "needs_student": False,
      "seed_keywords": ["정리", "요약", "오늘 배운", "마무리", "정리하면"]},
     # ── C3 개념 설명 명확성 ──
     {"key": "C3_definition", "category": "C3", "title": "개념 정의",
-     "description": ("핵심 개념을 처음 등장 시 명확하게 정의하는가. "
-                     "용어를 언급만 하는 것이 아니라 그 의미를 설명해야 인정한다. "
-                     "'A는 B다/A란 B를 말한다'처럼 형식을 갖추지 않아도, 평이한 서술로 "
-                     "개념의 의미를 풀어주면 정의로 본다. 용어만 반복 등장하고 의미 설명이 "
-                     "없으면 점수를 낮춘다."),
+     "description": "새로운 핵심 개념 등장 시 명확하고 이해하기 쉽게 정의하는가.",
      "weight": "high", "eval_type": "local", "needs_student": False,
      "seed_keywords": ["이란", "정의", "라고 합니다", "라고 해", "의미"]},
+    {"key": "C3_term_explanation", "category": "C3", "title": "용어 설명 충분성",
+     "description": ("전문 용어나 기술 용어를 설명 없이 사용하지 않고 적절한 해설을 "
+                     "제공하는가."),
+     "weight": "high", "eval_type": "local", "needs_student": False,
+     "seed_keywords": ["용어", "줄여서", "약자", "라는 게", "라는 건", "뜻"]},
     {"key": "C3_analogy", "category": "C3", "title": "비유 및 예시 활용",
-     "description": ("어려운 개념에 적절한 비유나 실생활 예시를 활용하는가. "
-                     "비유·예시가 설명 중인 개념과 실제로 연결되어 이해를 돕는 경우에만 "
-                     "인정한다. '예를 들어' 같은 표현이 나와도 뒤따르는 내용이 개념과 "
-                     "무관하거나 단순 사실 나열이면 점수를 낮춘다."),
+     "description": ("어려운 개념을 설명하기 위해 적절한 비유, 사례, 실생활 예시를 "
+                     "활용하는가."),
      "weight": "high", "eval_type": "local", "needs_student": False,
      "seed_keywords": ["예를 들어", "비유", "마치", "처럼", "쉽게 말하", "실생활"]},
     {"key": "C3_prerequisite", "category": "C3", "title": "선행 개념 확인",
-     "description": ("선행 개념 없이 갑자기 심화 내용으로 넘어가지 않는가. "
-                     "새 개념을 도입하기 전에 그 개념이 기대는 선행 지식을 짚어주거나 "
-                     "'앞에서 배운', '이미 아시다시피' 식으로 연결하는지 본다. "
-                     "선행 설명 없이 심화 용어가 갑자기 등장하면 점수를 낮춘다."),
-     "weight": "mid", "eval_type": "global", "needs_student": False,
+     "description": "선행 개념 설명 없이 갑작스럽게 심화 내용으로 넘어가지 않는가.",
+     "weight": "high", "eval_type": "global", "needs_student": False,
      "seed_keywords": []},
-    {"key": "C3_pace", "category": "C3", "title": "발화 속도 적절성",
+    {"key": "C3_concept_connection", "category": "C3", "title": "개념 간 연결성",
+     "description": "현재 개념을 이전에 학습한 개념과 연결하여 설명하는가.",
+     "weight": "mid", "eval_type": "local", "needs_student": False,
+     "seed_keywords": ["연결", "관련", "이어서", "마찬가지로", "연관", "관계"]},
+    {"key": "C3_code_explanation", "category": "C3", "title": "코드 설명 충실성",
+     "description": "코드의 동작뿐 아니라 작성 이유와 의도를 함께 설명하는가.",
+     "weight": "high", "eval_type": "local", "needs_student": False,
+     "seed_keywords": ["코드", "이 줄", "왜 이렇게", "의도", "이 부분은"]},
+    # ── C4 진행 방식 ──
+    {"key": "C4_pace", "category": "C4", "title": "발화 속도 적절성",
      "description": "타임스탬프 기준 분당 발화량이 수강생이 따라가기 적절한 수준인가.",
      "weight": "mid", "eval_type": "metric", "needs_student": False,
      "seed_keywords": []},
-    # ── C4 예시 및 실습 연계 ──
-    {"key": "C4_example", "category": "C4", "title": "예시 적절성",
-     "description": "예시가 강의 수준 및 실제 업무 현장과 연관성이 있는가.",
+    {"key": "C4_transition", "category": "C4", "title": "학습 전환 안내",
+     "description": ("주제 변경 또는 새로운 챕터 진입 시 전환 멘트를 통해 흐름을 "
+                     "안내하는가."),
+     "weight": "mid", "eval_type": "local", "needs_student": False,
+     "seed_keywords": ["넘어가", "다음으로", "이번에는", "이어서", "정리하고", "다음 챕터"]},
+    # ── C5 실습 및 적용 ──
+    {"key": "C5_example", "category": "C5", "title": "예시 적절성",
+     "description": ("예시가 학습 수준에 적합하며 실제 업무 또는 실무 상황과 관련성이 "
+                     "있는가."),
      "weight": "high", "eval_type": "local", "needs_student": False,
      "seed_keywords": ["예시", "실무", "현업", "사례", "예로"]},
-    {"key": "C4_practice", "category": "C4", "title": "실습 연계",
-     "description": "이론 설명 후 실습으로 자연스럽게 연결되는가.",
+    {"key": "C5_practice", "category": "C5", "title": "실습 연계",
+     "description": "이론 설명 후 실습이나 적용 과정으로 자연스럽게 연결되는가.",
      "weight": "high", "eval_type": "local", "needs_student": False,
      "seed_keywords": ["실습", "해보", "직접", "쳐보"]},
-    {"key": "C4_error", "category": "C4", "title": "오류 대응",
-     "description": ("실습 중 발생하는 오류나 질문에 적절히 대응하는가. "
-                     "오류 상황을 단순히 언급하는 데 그치지 않고, 오류의 원인과 해결 "
-                     "방법까지 안내해야 높은 점수를 준다. '에러', '안 돼' 같은 단어만 "
-                     "등장하고 후속 설명이 없으면 점수를 낮춘다."),
-     "weight": "mid", "eval_type": "local", "needs_student": False,
-     "seed_keywords": ["에러", "안 돼", "안돼", "왜 안", "버그", "틀렸"]},
-    # ── C5 수강생 상호작용 ──
-    {"key": "C5_check", "category": "C5", "title": "이해 확인 질문",
-     "description": ("수강생의 이해 여부를 확인하는 질문을 적절히 하는가"
-                     "('되셨어요?','이해하셨나요?' 등). 단순 추임새('자', '네')가 아니라 "
-                     "수강생의 이해 상태를 묻고 반응을 기다리는 의도가 보여야 인정한다. "
-                     "확인 질문이 형식적으로 한두 번 나오는 것과, 설명 단락마다 짚어주는 "
-                     "것을 구분해 후자에 더 높은 점수를 준다."),
-     "weight": "high", "eval_type": "local", "needs_student": False,
-     "seed_keywords": ["되셨어요", "이해하셨", "아시겠", "맞죠", "괜찮으세요", "되시나요"]},
-    {"key": "C5_engage", "category": "C5", "title": "참여 유도",
-     "description": ("일방적 설명이 아닌 수강생의 직접 참여(풀어보기, 확인 등)를 "
-                     "유도하는가. 수강생이 직접 행동하도록 요청하는 발화여야 인정한다 "
-                     "('해보세요', '직접 쳐보세요', '같이 풀어볼까요'). 강사가 혼자 "
-                     "시연하면서 '해볼게요'라고 하는 것은 참여 유도로 보지 않는다."),
-     "weight": "high", "eval_type": "local", "needs_student": False,
-     "seed_keywords": ["해보세요", "풀어", "직접 해", "해볼까요", "같이", "나와서"]},
-    {"key": "C5_answer", "category": "C5", "title": "질문 응답·상호작용",
-     "description": ("수강생의 질문이나 궁금증(명시적·암묵적)을 받아 강사가 충분히 "
-                     "응답·해소하려 하는가. 단일화자 데이터에서는 강사가 질문을 유도하고 "
-                     "답하려는 상호작용 뉘앙스로 판단('질문 있으세요?', '왜 안 될까요?' 후 설명 등)."),
-     "weight": "high", "eval_type": "local", "needs_student": False,
-     "seed_keywords": ["질문 있", "궁금한", "질문 받", "물어보", "여쭤",
-                       "왜 그러냐면", "왜 안", "혹시 질문", "답은"]},
 ]
 
 assert len(CHECKLIST) == 18, "체크리스트는 18개 항목이어야 함"
