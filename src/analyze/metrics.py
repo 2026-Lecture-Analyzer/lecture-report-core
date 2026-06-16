@@ -85,7 +85,9 @@ def compute_metrics(blocks: list[dict], clean_text: str = "",
 
     # C5 상호작용 cue(raw 기준 — refine 가 지우는 구어체 신호). 10분당 빈도.
     check_cue_n = sum(text.count(c) for c in config.C5_CHECK_CUES)
-    engage_cue_n = sum(text.count(c) for c in config.C5_ENGAGE_CUES)
+    # '같이'는 행동동사 앞일 때만(똑같이·함께 오탐 제거) — 정규식 카운트 별도 합산.
+    engage_cue_n = (sum(text.count(c) for c in config.C5_ENGAGE_CUES)
+                    + len(re.findall(config.C5_ENGAGE_GACHI, text)))
     check_per10 = check_cue_n / elapsed_min * 10
     engage_per10 = engage_cue_n / elapsed_min * 10
 

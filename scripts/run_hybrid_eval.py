@@ -4,9 +4,10 @@ gold(02-02) 결과: C2~C4 는 holistic 이 사람 수준, C1 은 raw 메트릭�
 정제본에 속음). 그래서 항목별로 입력을 분기한다:
 
   • raw 메트릭(결정적, LLM 없음) : C1_repetition · C1_consistency · C1_completeness · C3_pace
-  • holistic(전체원문 1패스 LLM)  : 나머지 14항목(C2 구조 · C3 개념 · C4 실습 · C5 상호작용)
+                                   · C5_check · C5_engage (정제가 cue 지움, §9-2)
+  • holistic(전체원문 1패스 LLM)  : 나머지 12항목(C2 구조 · C3 개념 · C4 실습 · C5_answer)
 
-설계 = holistic 로 18항목 채점 후, 결정적 4항목만 메트릭 점수로 **덮어쓰기**(reuse 최대).
+설계 = holistic 로 18항목 채점 후, 결정적 6항목만 메트릭 점수로 **덮어쓰기**(reuse 최대).
 출력은 analysis.jsonl 동일 스키마 → 같은 스코어러/리포트/대시보드 그대로.
 
 사용법:
@@ -117,7 +118,8 @@ def main() -> None:
     all_rows = []
     with out.open("w", encoding="utf-8") as w:
         for lid, secs in lecs.items():
-            rows = evaluate_lecture(lid, secs, generate_fn, args.self_consistency)
+            rows = evaluate_lecture(lid, secs, generate_fn, args.self_consistency,
+                                    backend=args.backend or config.MODEL_BACKEND)
             metrics = compute_metrics(merged_g.get(lid, []), raw_texts=raw_g.get(lid))
             n_over = 0
             for r in rows:

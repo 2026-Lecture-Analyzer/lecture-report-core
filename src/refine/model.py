@@ -144,6 +144,18 @@ def make_google_generate_fn(api_key: str = None, model: str = None,
     model = model or config.GOOGLE_MODEL
     max_tokens = max_tokens or config.GEN_MAX_NEW_TOKENS
 
+    # gemini-2.5 thinking 처리: flash 는 기본 thinking 이 max_output_tokens 를 소진해
+    # 구조화 출력이 잘림 → thinking_budget=0 으로 끈다. pro 는 thinking 필수라 끄면 400 →
+    # 그대로 두고(기본) 추론+출력이 함께 들어가게 max_tokens 를 넉넉히 확보한다.
+    think_cfg = None
+    if "flash" in (model or ""):
+        try:
+            think_cfg = types.ThinkingConfig(thinking_budget=0)
+        except Exception:
+            think_cfg = None
+    else:                                   # pro 등 thinking 필수 모델 — 출력 여유 확보
+        max_tokens = max(max_tokens, 24000)
+
     def generate_fn(messages: list[dict]) -> str:
         system, contents = _to_gemini_contents(messages)
         resp = client.models.generate_content(
@@ -152,6 +164,7 @@ def make_google_generate_fn(api_key: str = None, model: str = None,
                 system_instruction=system or None,
                 temperature=temperature,
                 max_output_tokens=max_tokens,
+                thinking_config=think_cfg,
             ),
         )
         try:

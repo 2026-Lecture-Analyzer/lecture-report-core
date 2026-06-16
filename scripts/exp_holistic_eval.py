@@ -40,6 +40,24 @@ _SYS = (
     "(5) 반드시 지정한 JSON 배열로만 답한다(설명 텍스트 금지)."
 )
 
+# Google(Gemini) 전용 채점 보정 — flash 는 박하게(편향 -1.1), pro 는 후하게(+1.2) 치우쳐
+# 사람 채점과 안 맞음(gold 검증). 척도를 구체 앵커로 못박아 편향을 잡는다. Upstage 경로엔 미적용.
+_GOOGLE_CALIB = (
+    "\n[채점 보정 — 반드시 준수]\n"
+    "점수를 깎지도 부풀리지도 말고 아래 앵커에 맞춰라:\n"
+    "• 5 = 해당 행동이 명확하고 반복적으로 나타남\n"
+    "• 4 = 분명히 나타나며 대체로 잘함(일부 미흡 허용) — 양호한 일반 강의의 기본값\n"
+    "• 3 = 보통 수준으로 존재(평이하게라도 수행함)\n"
+    "• 2 = 약하거나 드물게만 나타남\n"
+    "• 1 = 거의/전혀 없음\n"
+    "실제 강의의 대부분 항목은 3~4점에 분포한다. 평이한 서술로라도 근거가 있으면 3 이상으로 "
+    "인정하고, 명백한 결함이 있을 때만 2 이하를 준다. 한두 군데 흠으로 과도하게 깎지 마라.\n"
+)
+
+
+def _calib(backend: str | None) -> str:
+    return _GOOGLE_CALIB if backend in ("google", "gemini") else ""
+
 
 def _lectures(clean_path: Path, by_date: bool = False) -> dict[str, list[dict]]:
     """clean.jsonl → {lecture_id: 섹션들}. by_date=True 면 오전+오후를 하루로 합침.
@@ -81,10 +99,10 @@ def _rubric() -> str:
     return "\n".join(out)
 
 
-def build_messages(sections: list[dict]) -> list[dict]:
+def build_messages(sections: list[dict], backend: str | None = None) -> list[dict]:
     keys = ", ".join(it["key"] for it in CHECKLIST)
     user = (
-        f"[채점 척도] {_SCALE}\n\n"
+        f"[채점 척도] {_SCALE}{_calib(backend)}\n\n"
         f"[평가 항목 18개]\n{_rubric()}\n\n"
         f"[강의 전사 — 전체]\n{_transcript(sections)}\n\n"
         f"위 18개 항목을 강의 전체 근거로 각각 채점하라. 반드시 18개 전부, "
@@ -152,14 +170,16 @@ def _median(xs: list[int]):
     return xs[n // 2] if n % 2 else round((xs[n // 2 - 1] + xs[n // 2]) / 2)
 
 
-def evaluate_lecture(lid: str, sections: list[dict], generate_fn, samples: int) -> list[dict]:
+def evaluate_lecture(lid: str, sections: list[dict], generate_fn, samples: int,
+                     backend: str | None = None) -> list[dict]:
     """holistic 채점 → analysis.jsonl 호환 행 리스트(18개). self-consistency=항목별 중앙값.
 
     lid 는 그룹 키(세션 모드=date_session, day 모드=date). session 은 lid 에서 유도.
     """
     meta = sections[0]
     session = meta["session"] if "_" in lid else "전체"
-    runs = [_parse_items(generate_fn(build_messages(sections))) for _ in range(max(1, samples))]
+    runs = [_parse_items(generate_fn(build_messages(sections, backend)))
+            for _ in range(max(1, samples))]
 
     rows = []
     for it in CHECKLIST:
@@ -269,7 +289,8 @@ def main() -> None:
     all_rows = []
     with args.out.open("w", encoding="utf-8") as w:
         for lid, secs in lecs.items():
-            rows = evaluate_lecture(lid, secs, generate_fn, args.self_consistency)
+            rows = evaluate_lecture(lid, secs, generate_fn, args.self_consistency,
+                                    backend=args.backend or config.MODEL_BACKEND)
             for r in rows:
                 w.write(json.dumps(r, ensure_ascii=False) + "\n")
             all_rows += rows
