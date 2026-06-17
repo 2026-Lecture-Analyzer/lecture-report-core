@@ -53,6 +53,40 @@ _SCORE_COLOR = {
     5: "#059669", 4: "#34d399",
     3: "#f59e0b", 2: "#f97316", 1: "#ef4444",
 }
+_EVAL_BADGE = {
+    "metric":     ("지표",   "#3b82f6"),
+    "local":      ("검색",   "#f59e0b"),
+    "global":     ("전역",   "#ec4899"),
+    "positional": ("위치",   "#10b981"),
+}
+
+
+def _fmt_metric(metric: dict | None) -> str:
+    """metric dict → 사람이 읽기 좋은 짧은 문자열."""
+    if not metric:
+        return ""
+    name = metric.get("name", "")
+    value = metric.get("value")
+    _label: dict[str, tuple[str, object]] = {
+        "filler_rate":          ("필러율",    lambda v: f"{v:.1%}"),
+        "pace_cpm":             ("속도",      lambda v: f"{v:.0f}cpm"),
+        "honorific_ratio":      ("존댓말비율", lambda v: f"{v:.0%}"),
+        "incomplete_ratio_utt": ("미완결율",  lambda v: f"{v:.0%}"),
+        "incomplete_ratio":     ("미완결율",  lambda v: f"{v:.0%}"),
+    }
+    label, fmt = _label.get(name, (name, str))
+    try:
+        val_str = fmt(value) if value is not None else "?"  # type: ignore[operator]
+    except Exception:
+        val_str = str(value)
+    parts = [f"{label} {val_str}"]
+    top = metric.get("top_filler")
+    if top:
+        parts.append(f"최다 '{top}'")
+    n = metric.get("n")
+    if n is not None:
+        parts.append(f"{n}회")
+    return " · ".join(parts)
 
 
 def _item_color(score: int | None) -> str:
@@ -175,6 +209,11 @@ def _highlight_component(
     """
     chunk_map = {c["chunk_id"]: html.escape(c["clean_text"]) for c in chunks}
     chunk_ids_ordered = [c["chunk_id"] for c in chunks]
+    # 타임스탬프 맵 — JS에서 헤더에 표시할 때 사용
+    chunk_times = {
+        c["chunk_id"]: f"{c.get('start_time', '')}–{c.get('end_time', '')}"
+        for c in chunks if c.get("start_time")
+    }
 
     # 카테고리별 그룹핑
     by_cat: dict[str, list[dict]] = {c: [] for c in sorted(CATEGORIES)}
@@ -202,11 +241,25 @@ def _highlight_component(
             weight = _WEIGHT_LABEL.get(item.get("weight", ""), "")
             verdict = html.escape((item.get("verdict") or "")[:100])
             title = html.escape(item.get("title", ""))
-            cat = item.get("category", "")
             evidence = item.get("evidence", [])
             quotes_json = json.dumps([e.get("quote", "") for e in evidence], ensure_ascii=False)
             chunk_ids_json = json.dumps([e.get("chunk_id", -1) for e in evidence])
             score_disp = str(score) if score is not None else "N/A"
+
+            # 평가 방식 배지
+            eval_type = item.get("eval_type", "")
+            badge_label, badge_color = _EVAL_BADGE.get(eval_type, ("", "#94a3b8"))
+            badge_html = (
+                f'<span class="eval-badge" style="background:{badge_color}20;'
+                f'color:{badge_color};border:1px solid {badge_color}40">'
+                f'{badge_label}</span>'
+            ) if badge_label else ""
+
+            # 지표값 표시
+            metric_text = html.escape(_fmt_metric(item.get("metric")))
+            metric_html = (
+                f'<span class="metric-val">{metric_text}</span>'
+            ) if metric_text else ""
 
             items_html_parts.append(f"""
         <div class="item-row"
@@ -219,13 +272,16 @@ def _highlight_component(
             <span class="item-title">{title}</span>
             <span class="item-score" style="color:{color}">{score_disp}점</span>
           </div>
-          <div style="display:flex;align-items:center;gap:5px;margin-top:2px">
+          <div style="display:flex;align-items:center;gap:5px;margin-top:3px;flex-wrap:wrap">
             <span class="item-weight">{weight}</span>
+            {badge_html}
             {f'<span class="item-verdict">{verdict}</span>' if verdict else ''}
           </div>
+          {f'<div style="margin-top:2px">{metric_html}</div>' if metric_html else ''}
         </div>""")
 
     items_html = "\n".join(items_html_parts)
+    chunk_times_json = json.dumps(chunk_times, ensure_ascii=False)
 
     # 원문 청크 HTML
     chunks_html_parts: list[str] = []
@@ -346,6 +402,23 @@ def _highlight_component(
     color: #64748b;
     line-height: 1.4;
   }}
+  .eval-badge {{
+    font-size: 9.5px;
+    font-weight: 700;
+    border-radius: 4px;
+    padding: 1px 5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    letter-spacing: .02em;
+  }}
+  .metric-val {{
+    font-size: 10.5px;
+    color: #3b82f6;
+    background: #eff6ff;
+    border-radius: 4px;
+    padding: 1px 6px;
+    white-space: nowrap;
+  }}
 
   /* ── 우측 원문 패널 ── */
   .text-panel {{
@@ -410,7 +483,8 @@ def _highlight_component(
 </div>
 
 <script>
-const chunkMap = {chunk_map_json};
+const chunkMap   = {chunk_map_json};
+const chunkTimes = {chunk_times_json};
 let currentRow = null;
 let pinnedRow  = null;
 let leaveTimer = null;
@@ -463,8 +537,10 @@ function applyRowHighlight(row) {{
     }}
   }});
 
+  const timeStr = chunkIds.length > 0 && chunkTimes[chunkIds[0]]
+    ? ' &nbsp;·&nbsp; ' + chunkTimes[chunkIds[0]] : '';
   document.getElementById('text-header').innerHTML =
-    '근거 청크 ' + chunkIds.join(', ') + ' &nbsp;·&nbsp; 인용 ' + quotes.length + '건';
+    '근거 청크 ' + chunkIds.join(', ') + ' &nbsp;·&nbsp; 인용 ' + quotes.length + '건' + timeStr;
 }}
 
 function onHover(row) {{
@@ -688,6 +764,30 @@ with tab_ov:
                 unsafe_allow_html=True,
             )
 
+    # 부정 증거 항목 — 근거 청크가 검색되지 않은 항목
+    neg_items = [d for d in lec["items"] if d.get("negative")]
+    if neg_items:
+        st.divider()
+        st.markdown("##### 🔍 강의에서 관찰되지 않은 항목")
+        st.caption("임베딩 검색에서 관련 청크를 찾지 못해 1점(없음)으로 자동 처리된 항목입니다.")
+        cols = st.columns(min(len(neg_items), 3))
+        for i, d in enumerate(neg_items):
+            meta = items_meta.get(d["item_key"], {})
+            cat  = meta.get("category", "")
+            dot  = _CAT_COLORS.get(cat, "#94a3b8")
+            cols[i % 3].markdown(
+                f"<div style='padding:10px 12px;border-radius:8px;border:1px solid #fecaca;"
+                f"background:#fff5f5;margin-bottom:8px'>"
+                f"<span style='display:inline-block;width:7px;height:7px;border-radius:50%;"
+                f"background:{dot};margin-right:6px;vertical-align:middle'></span>"
+                f"<span style='font-size:12px;font-weight:600;color:#1e293b'>"
+                f"{meta.get('title', d['item_key'])}</span>"
+                f"<br><span style='font-size:11px;color:#ef4444;margin-left:13px'>"
+                f"{cat} · 근거 미검색</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
 
 # ════════════════════════════════════════════════════════
 # TAB 2 · 항목별 상세 + 원문 하이라이트
@@ -726,13 +826,15 @@ with tab_items:
             for item in by_cat_map[ck]:
                 r = rows_by_key.get(item["key"], {})
                 items_data.append({
-                    "key":      item["key"],
-                    "title":    item["title"],
-                    "category": item["category"],
-                    "weight":   item["weight"],
-                    "score":    r.get("score"),
-                    "verdict":  r.get("verdict") or "",
-                    "evidence": r.get("evidence") or [],
+                    "key":       item["key"],
+                    "title":     item["title"],
+                    "category":  item["category"],
+                    "weight":    item["weight"],
+                    "score":     r.get("score"),
+                    "verdict":   r.get("verdict") or "",
+                    "evidence":  r.get("evidence") or [],
+                    "eval_type": r.get("eval_type") or "",
+                    "metric":    r.get("metric"),
                 })
 
         _highlight_component(items_data, lec_chunks, height=620)
