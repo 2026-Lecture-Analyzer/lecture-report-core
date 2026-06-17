@@ -73,8 +73,6 @@ def _fmt_metric(metric: dict | None) -> str:
         "honorific_ratio":      ("존댓말비율", lambda v: f"{v:.0%}"),
         "incomplete_ratio_utt": ("미완결율",  lambda v: f"{v:.0%}"),
         "incomplete_ratio":     ("미완결율",  lambda v: f"{v:.0%}"),
-        "check_per10":          ("이해확인",  lambda v: f"{v:.1f}/10분"),
-        "engage_per10":         ("참여유도",  lambda v: f"{v:.1f}/10분"),
     }
     label, fmt = _label.get(name, (name, str))
     try:
