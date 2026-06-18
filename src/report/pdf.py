@@ -214,7 +214,12 @@ def build_lecture_pdf(lecture_id: str, scores: dict, analysis_rows: list[dict],
                 flow.append(Paragraph(escape(r["comment"]), st["quote"]))
             for ev in (r.get("evidence") or [])[:2]:
                 cid = ev.get("chunk_id")
-                tstr = f" ({chunk_time_map[cid]})" if cid in chunk_time_map else f" (chunk {cid})"
+                if cid in chunk_time_map:
+                    tstr = f" ({chunk_time_map[cid]})"
+                elif ev.get("time"):
+                    tstr = f" ({ev['time']})"
+                else:
+                    tstr = ""
                 flow.append(Paragraph(
                     "“" + escape(ev.get("quote", "")) + "”" + escape(tstr),
                     st["quote"]))

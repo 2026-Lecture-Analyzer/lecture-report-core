@@ -244,6 +244,7 @@ def _highlight_component(
             evidence = item.get("evidence", [])
             quotes_json = json.dumps([e.get("quote", "") for e in evidence], ensure_ascii=False)
             chunk_ids_json = json.dumps([e.get("chunk_id", -1) for e in evidence])
+            ev_times_json = json.dumps([e.get("time", "") for e in evidence], ensure_ascii=False)
             score_disp = str(score) if score is not None else "N/A"
 
             # 평가 방식 배지
@@ -265,6 +266,7 @@ def _highlight_component(
         <div class="item-row"
              data-quotes='{html.escape(quotes_json, quote=True)}'
              data-chunk-ids='{chunk_ids_json}'
+             data-ev-times='{html.escape(ev_times_json, quote=True)}'
              onmouseenter="onHover(this)"
              onmouseleave="onLeave(this)"
              onclick="onClick(this)">
@@ -537,10 +539,16 @@ function applyRowHighlight(row) {{
     }}
   }});
 
-  const timeStr = chunkIds.length > 0 && chunkTimes[chunkIds[0]]
+  const evTimes = JSON.parse(row.dataset.evTimes || '[]');
+  const chunkTimeStr = chunkIds.length > 0 && chunkTimes[chunkIds[0]]
     ? ' &nbsp;·&nbsp; ' + chunkTimes[chunkIds[0]] : '';
+  const hybridTimeStr = evTimes.length > 0 && evTimes[0]
+    ? ' &nbsp;·&nbsp; ' + evTimes[0] : '';
+  const timeStr = chunkTimeStr || hybridTimeStr;
+  const chunkLabel = chunkIds.some(id => id >= 0)
+    ? '근거 청크 ' + chunkIds.filter(id => id >= 0).join(', ') + ' &nbsp;·&nbsp; ' : '';
   document.getElementById('text-header').innerHTML =
-    '근거 청크 ' + chunkIds.join(', ') + ' &nbsp;·&nbsp; 인용 ' + quotes.length + '건' + timeStr;
+    chunkLabel + '인용 ' + quotes.length + '건' + timeStr;
 }}
 
 function onHover(row) {{
