@@ -60,6 +60,11 @@ _EVAL_BADGE = {
     "positional": ("위치",   "#10b981"),
 }
 
+_METHOD_BADGE = {
+    "raw_metric":           ("결정적", "#6366f1"),
+    "holistic_fullcontext": ("전체원문", "#0ea5e9"),
+}
+
 
 def _fmt_metric(metric: dict | None) -> str:
     """metric dict → 사람이 읽기 좋은 짧은 문자열."""
@@ -256,6 +261,15 @@ def _highlight_component(
                 f'{badge_label}</span>'
             ) if badge_label else ""
 
+            # routing.method 배지
+            routing_method = item.get("routing_method", "")
+            method_label, method_color = _METHOD_BADGE.get(routing_method, ("", "#94a3b8"))
+            method_html = (
+                f'<span class="eval-badge" style="background:{method_color}20;'
+                f'color:{method_color};border:1px solid {method_color}40">'
+                f'{method_label}</span>'
+            ) if method_label else ""
+
             # 지표값 표시
             metric_text = html.escape(_fmt_metric(item.get("metric")))
             metric_html = (
@@ -277,6 +291,7 @@ def _highlight_component(
           <div style="display:flex;align-items:center;gap:5px;margin-top:3px;flex-wrap:wrap">
             <span class="item-weight">{weight}</span>
             {badge_html}
+            {method_html}
             {f'<span class="item-verdict">{verdict}</span>' if verdict else ''}
           </div>
           {f'<div style="margin-top:2px">{metric_html}</div>' if metric_html else ''}
@@ -841,8 +856,9 @@ with tab_items:
                     "score":     r.get("score"),
                     "verdict":   r.get("verdict") or "",
                     "evidence":  r.get("evidence") or [],
-                    "eval_type": r.get("eval_type") or "",
-                    "metric":    r.get("metric"),
+                    "eval_type":      r.get("eval_type") or "",
+                    "metric":         r.get("metric"),
+                    "routing_method": (r.get("routing") or {}).get("method") or "",
                 })
 
         _highlight_component(items_data, lec_chunks, height=620)
