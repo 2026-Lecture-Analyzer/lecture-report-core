@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-import base64
 import html
 import json
 import os
@@ -21,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src import config
 from src.analyze.checklist import CATEGORIES, by_category, by_key
 from src.report.build import _grade, _load_jsonl
+from src.report.highlight_html import resolve_chunk_ids
 
 # ── 페이지 설정 ──────────────────────────────────────────────────────────
 st.set_page_config(
@@ -207,6 +207,7 @@ def _highlight_component(
     hover: 근거 하이라이트 + 자동스크롤
     click: 고정(pin) — 다시 클릭하면 해제
     """
+    resolve_chunk_ids(items_data, chunks)   # evidence 인용문 → chunk_id 역매핑(없을 때만)
     chunk_map = {c["chunk_id"]: html.escape(c["clean_text"]) for c in chunks}
     chunk_ids_ordered = [c["chunk_id"] for c in chunks]
     # 타임스탬프 맵 — JS에서 헤더에 표시할 때 사용
@@ -582,8 +583,10 @@ function onClick(row) {{
 </body>
 </html>"""
 
-    encoded = base64.b64encode(raw_html.encode("utf-8")).decode("ascii")
-    st.iframe(src=f"data:text/html;base64,{encoded}", height=height + 4)
+    # components.html(srcdoc·allow-scripts)로 렌더해야 inline JS 핸들러가 동작한다.
+    # (data: URL iframe은 opaque origin이라 hover 핸들러가 막히는 브라우저가 있음)
+    import streamlit.components.v1 as components
+    components.html(raw_html, height=height + 4, scrolling=False)
 
 
 # ── 데이터 로드 ───────────────────────────────────────────────────────────
