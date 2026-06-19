@@ -107,7 +107,9 @@ def build_messages(sections: list[dict], backend: str | None = None) -> list[dic
         f"[강의 전사 — 전체]\n{_transcript(sections)}\n\n"
         f"위 18개 항목을 강의 전체 근거로 각각 채점하라. 반드시 18개 전부, "
         f"아래 JSON 배열로만 답한다(item_key 는 위 목록 그대로: {keys}).\n"
-        "출력 절약: evidence 는 핵심 1~2개만, quote 는 60자 이내, comment 는 한 문장.\n"
+        "각 항목 evidence 는 그 항목 정의에 '직접' 부합하는 발화만 골라라 — 다른 항목과 같은 "
+        "문장을 재사용하지 말고, 가장 강하게 부합하는 것부터 2~4개(있는 만큼). "
+        "quote 는 60자 이내, comment 는 한 문장.\n"
         '[{"item_key":"C1_repetition","score":1~5 정수,'
         '"verdict":"우수/양호/보통/미흡/없음 중 하나",'
         '"evidence":[{"time":"HH:MM","quote":"≤60자 인용"}],'

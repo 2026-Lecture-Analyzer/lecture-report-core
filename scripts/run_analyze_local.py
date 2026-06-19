@@ -83,7 +83,7 @@ def _run_hybrid(args, samples: int) -> None:
         clean_path=clean, merged_path=merged, raw_path=raw_path,
         generate_fn=generate_fn, out_path=out_path, samples=samples,
         by_date=args.by_date, backend=args.backend,
-        only_lecture=args.lecture)
+        only_lecture=args.lecture, chunks_path=args.chunks)
 
     rows = load_jsonl(out_path)
     avg = [r["score"] for r in rows if r.get("score") is not None]

@@ -15,6 +15,7 @@ NOTE: holistic 평가 함수(evaluate_lecture, _lectures)는 현재 scripts/exp_
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -25,6 +26,52 @@ from src.analyze.metrics import (compute_metrics, score_global_metric_item,
 # raw 메트릭으로 덮어쓸 결정적 항목 (나머지는 holistic 유지)
 # C1·pace = 정제본이 신호를 지우거나 무뎌지게 함(§8) → raw(merged.text) 기준 규칙 채점.
 METRIC_ITEMS = {"C1_repetition", "C1_completeness", "C1_consistency", "C4_pace"}
+
+# 근거(evidence) 분리: 점수는 holistic, 근거는 항목별 임베딩 태깅(⑤ eval_tags)에서 top-k.
+# holistic LLM 의 근거 선택이 약하고(엉뚱·중복·비결정적) → 항목별 검색 근거로 교체해
+# "정의에 직접 부합·항목 전용·결정적" 근거를 준다. 태깅 없는 global 항목은 holistic 근거 유지.
+RETRIEVAL_EVIDENCE_K = 3
+
+
+def _chunks_by(chunks_path, by_date: bool) -> dict[str, list[dict]]:
+    p = Path(chunks_path) if chunks_path else None
+    if not p or not p.exists():
+        return {}
+    g: dict[str, list[dict]] = defaultdict(list)
+    for line in p.open(encoding="utf-8"):
+        if not line.strip():
+            continue
+        c = json.loads(line)
+        g[c.get("date") if by_date else c.get("lecture_id")].append(c)
+    return g
+
+
+def _snippet(text: str, cue: str, maxlen: int = 80) -> str:
+    """청크에서 근거가 될 대표 한 문장(가능하면 cue 포함) — 형광펜용이라 clean_text 그대로의 부분."""
+    sents = re.split(r"(?<=[.!?])\s+", text or "")
+    pick = next((s for s in sents if cue and cue in s), None) or (sents[0] if sents else text)
+    return (pick or "").strip()[:maxlen]
+
+
+def attach_retrieval_evidence(row: dict, lec_chunks: list[dict],
+                              top_k: int = RETRIEVAL_EVIDENCE_K) -> bool:
+    """row(holistic 채점)의 evidence 를 항목별 태깅 top-k 청크로 교체. 태깅 없으면 유지."""
+    key = row["item_key"]
+    cand = []
+    for c in lec_chunks:
+        for t in (c.get("eval_tags") or []):
+            # cue(키워드 확정) 있는 태그만 — 순수 임베딩(cue=None)은 오탐 많음(휴식공지·UI 안내 등).
+            if t.get("item_key") == key and t.get("cue"):
+                cand.append((t.get("score", t.get("sim", 0)), c, t.get("cue", "")))
+                break
+    if not cand:
+        return False
+    cand.sort(key=lambda x: -(x[0] or 0))
+    row["evidence"] = [{"chunk_id": c["chunk_id"], "time": (c.get("start_time") or "")[:5],
+                        "quote": _snippet(c.get("clean_text", ""), cue)}
+                       for _, c, cue in cand[:top_k]]
+    row.setdefault("routing", {})["evidence_source"] = "retrieval"
+    return True
 
 
 def _metric_row(item_key: str, metrics: dict) -> dict | None:
@@ -65,7 +112,8 @@ def _raw_texts_by(raw_path: Path, by_date: bool) -> dict[str, list[str]]:
 def run_hybrid_analysis(clean_path: Path, merged_path: Path, raw_path: Path,
                         generate_fn, out_path: Path, samples: int = 3,
                         by_date: bool = False, backend: str = None,
-                        only_lecture: str = None, log=print) -> dict:
+                        only_lecture: str = None, chunks_path: Path = None,
+                        log=print) -> dict:
     """하이브리드 평가 실행 → out_path(analysis.jsonl 스키마)에 항목별 1행씩 기록.
 
     반환: {"rows", "n_rows", "n_overwritten", "lectures", "output"}.
@@ -83,15 +131,18 @@ def run_hybrid_analysis(clean_path: Path, merged_path: Path, raw_path: Path,
 
     merged_g = _merged_by(merged_path, by_date)
     raw_g = _raw_texts_by(raw_path, by_date)
+    chunks_g = _chunks_by(chunks_path or config.PROCESSED_DIR / "chunks.jsonl", by_date)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     all_rows: list[dict] = []
     n_over_total = 0
+    n_retr_total = 0
     with out_path.open("w", encoding="utf-8") as w:
         for lid, secs in lecs.items():
             rows = evaluate_lecture(lid, secs, generate_fn, samples,
                                     backend=backend or config.MODEL_BACKEND)
             metrics = compute_metrics(merged_g.get(lid, []), raw_texts=raw_g.get(lid))
+            lec_chunks = chunks_g.get(lid, [])
             n_over = 0
             for r in rows:
                 if r["item_key"] in METRIC_ITEMS and metrics:
@@ -108,6 +159,9 @@ def run_hybrid_analysis(clean_path: Path, merged_path: Path, raw_path: Path,
                     if not isinstance(r.get("routing"), dict):
                         r["routing"] = {}
                     r["routing"].setdefault("method", "holistic_fullcontext")
+                    # 점수는 holistic, 근거는 항목별 태깅 top-k 로 교체(태깅 있으면).
+                    if attach_retrieval_evidence(r, lec_chunks):
+                        n_retr_total += 1
                 w.write(json.dumps(r, ensure_ascii=False) + "\n")
             all_rows += rows
             n_over_total += n_over
@@ -116,4 +170,5 @@ def run_hybrid_analysis(clean_path: Path, merged_path: Path, raw_path: Path,
                 f"{round(sum(scored)/len(scored),2) if scored else 'NA'}")
 
     return {"rows": all_rows, "n_rows": len(all_rows), "n_overwritten": n_over_total,
+            "n_retrieval_evidence": n_retr_total,
             "lectures": len(lecs), "output": str(out_path)}

@@ -494,14 +494,30 @@ function escRe(s) {{
   return s.replace(/[.*+?^${{}}()|[\\]\\\\]/g, '\\\\$&');
 }}
 
+function hlFrag(out, frag) {{
+  frag = frag.trim();
+  if (frag.length < 4) return out;
+  try {{
+    return out.replace(new RegExp('(' + escRe(frag) + ')', 'g'), '<mark class="hl">$1</mark>');
+  }} catch(e) {{ return out; }}
+}}
+
 function applyHighlights(text, quotes) {{
   let out = text;
   quotes.forEach(q => {{
-    if (!q || q.length < 4) return;
-    try {{
-      const re = new RegExp('(' + escRe(q) + ')', 'g');
-      out = out.replace(re, '<mark class="hl">$1</mark>');
-    }} catch(e) {{}}
+    if (!q) return;
+    let frag = q.replace(/\\s*[.…]+\\s*$/, '').trim();        // 끝의 '...'/'…' 제거
+    if (frag.length < 4) return;
+    if (text.includes(frag)) {{ out = hlFrag(out, frag); return; }}  // 전체 일치
+    // 안 맞으면 끝 단어를 하나씩 줄여 '가장 긴 접두 일치' 한 덩어리만 칠함
+    // (쉼표 분리는 'GROUP BY' 같은 짧은 조각이 엉뚱한 곳에 매칭돼 금지)
+    let s = frag;
+    while (s.length >= 8 && !text.includes(s)) {{
+      const i = s.lastIndexOf(' ');
+      if (i < 0) {{ s = ''; break; }}
+      s = s.slice(0, i);
+    }}
+    if (s.length >= 8) out = hlFrag(out, s);
   }});
   return out;
 }}
