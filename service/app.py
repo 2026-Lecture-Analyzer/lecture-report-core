@@ -89,9 +89,39 @@ with st.sidebar:
 
 # ── 워크스페이스 없으면 온보딩 ──
 if not active_wid:
-    st.title("워크스페이스를 만들어 시작하세요")
-    st.write("왼쪽 사이드바의 **➕ 새 워크스페이스**에서 워크스페이스를 만들거나, "
-             "동료에게 받은 **초대 코드/링크**로 합류하세요.")
+    st.markdown(
+        """
+        <style>.block-container {max-width:920px;}</style>
+        <div style="text-align:center; margin:1.5rem 0 1rem;">
+          <div style="font-size:3.2rem; line-height:1;">🚀</div>
+          <h1 style="margin:.4rem 0 .2rem;">워크스페이스를 만들어 시작하세요</h1>
+          <p style="color:#64748b; font-size:1.02rem;">
+            워크스페이스는 보고서를 모아두고 팀과 공유하는 공간이에요.
+            새로 만들거나, 받은 초대 코드로 합류하세요.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(border=True):
+        st.markdown("#### ➕ 새 워크스페이스 만들기")
+        nw = st.text_input("워크스페이스 이름", placeholder="예: ○○교육원", key="onb_new")
+        if st.button("만들기", type="primary", use_container_width=True,
+                     disabled=not nw.strip()):
+            ws = wsmod.create_workspace(nw.strip(), user, now=_now())
+            st.session_state["active_ws"] = ws.wid
+            st.rerun()
+    st.markdown("<p style='text-align:center; color:#94a3b8; margin:.6rem 0;'>또는</p>",
+                unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown("#### 🔗 초대 코드로 합류")
+        tok = st.text_input("초대 코드", placeholder="동료에게 받은 코드", key="onb_tok")
+        if st.button("합류하기", use_container_width=True, disabled=not tok.strip()):
+            ws = wsmod.accept_invite(tok.strip(), user, now=_now())
+            if ws:
+                st.session_state["active_ws"] = ws.wid
+                st.rerun()
+            else:
+                st.error("유효하지 않은 코드예요.")
     st.stop()
 
 ws = wsmod.load_workspace(active_wid)
