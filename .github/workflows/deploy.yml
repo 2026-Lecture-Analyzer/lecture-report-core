@@ -18,16 +18,23 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: SSH 키 설정
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: secrets.toml 생성(구글 OIDC — git 미포함)
+        # ⚠️ Secret 을 셸 명령에 직접 보간하면 TOML 안의 " 가 따옴표를 깨뜨림.
+        #    반드시 env 로 받아 변수로 써야 따옴표·줄바꿈이 보존된다.
+        env:
+          SECRETS_TOML: ${{ secrets.STREAMLIT_SECRETS_TOML }}
         run: |
           mkdir -p .streamlit
-          printf '%s\n' "${{ secrets.STREAMLIT_SECRETS_TOML }}" > .streamlit/secrets.toml
+          printf '%s\n' "$SECRETS_TOML" > .streamlit/secrets.toml
 
       - name: 인스턴스로 코드 전송(rsync)
         run: |
