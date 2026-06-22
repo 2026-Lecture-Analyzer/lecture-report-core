@@ -24,7 +24,7 @@ from __future__ import annotations
 import numpy as np
 
 from src import config
-from src.analyze.checklist import taggable_items
+from src.analyze.checklist import ITEM_EXEMPLARS, taggable_items
 from src.refine.embedding import cosine_matrix
 
 
@@ -46,8 +46,16 @@ def tag_chunks(chunks: list[dict], embed_fn, top_k: int = None,
     if not chunks:
         return chunks
 
-    # 항목 description 임베딩(태깅 대상만, 1회)
-    item_emb = embed_fn([it["description"] for it in items])     # [m, d]
+    # 항목 임베딩(태깅 쿼리) — exemplar(실제 발화 예시) 평균. 없으면 description 폴백.
+    # 추상 description 보다 구어체 청크와 변별력이 큼(§ITEM_EXEMPLARS, A/B +71%).
+    q_texts, q_spans = [], []
+    for it in items:
+        ex = ITEM_EXEMPLARS.get(it["key"]) or [it["description"]]
+        q_spans.append((len(q_texts), len(q_texts) + len(ex)))
+        q_texts.extend(ex)
+    q_emb = embed_fn(q_texts)                                    # [sum_k, d]
+    item_emb = np.stack([q_emb[s:e].mean(0) for s, e in q_spans])
+    item_emb = item_emb / (np.linalg.norm(item_emb, axis=1, keepdims=True) + 1e-9)
     # chunk 임베딩(없으면 clean_text로)
     if "chunk_emb" in chunks[0]:
         ch_emb = np.asarray([c["chunk_emb"] for c in chunks], dtype=np.float32)

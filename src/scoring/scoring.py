@@ -1,8 +1,8 @@
 """스코어링(⑦) — analysis.jsonl → scores.json. 규칙(결정적), LLM 안 씀.
 
-설계(readme_V1): **항목별 가중**(checklist.weight high3/mid2/low1)으로 종합.
-  항목 score(1~5) → 0~100 정규화 → 항목 가중 평균 → 카테고리·종합 강의력 점수.
-  N/A(score=None)·부정증거(score 있음)는 정책대로 처리.
+설계: **항목별 가중**(checklist.weight high3/mid2/low1)으로 종합.
+  항목 score(0~5) → 0~100 정규화(score/5*100) → 항목 가중 평균.
+  N/A(score=None)은 0점으로 처리해 분모에 포함 — 1점(20%)과 구분됨.
 
 scores.json: {lectures:{lid:{date,session,category_scores,total_score,n_na,items}}, summary}
 """
@@ -12,7 +12,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from src.analyze.checklist import (CATEGORIES, SCORE_MAX, SCORE_MIN,
+from src.analyze.checklist import (CATEGORIES, SCORE_MAX,
                                    WEIGHT_VALUE, by_key)
 
 
@@ -21,9 +21,9 @@ def load_analysis(path: Path) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def _norm(score_1_5: float) -> float:
-    """1~5 → 0~100."""
-    return (score_1_5 - SCORE_MIN) / (SCORE_MAX - SCORE_MIN) * 100
+def _norm(score_0_5: float) -> float:
+    """0~5 → 0~100.  score/5*100 (N/A=0점 포함 체계)."""
+    return score_0_5 / SCORE_MAX * 100
 
 
 def score_lecture(rows: list[dict]) -> dict:
@@ -40,20 +40,17 @@ def score_lecture(rows: list[dict]) -> dict:
         meta = items.get(key, {})
         s = r.get("score")
         w = WEIGHT_VALUE.get(meta.get("weight", "mid"), 2)
-        if s is None:                       # N/A → 가중에서 제외
+        na = s is None
+        if na:
             n_na += 1
-            detail.append({"item_key": key, "category": r["category"],
-                           "score": None, "norm": None, "weight": w,
-                           "negative": bool(r.get("routing", {}).get("negative_evidence"))})
-            continue
-        norm = _norm(float(s))
+        norm = _norm(0.0) if na else _norm(float(s))  # N/A → 0점으로 분모 포함
         cat = r["category"]
         cat_v[cat] += norm * w
         cat_w[cat] += w
         tot_v += norm * w
         tot_w += w
         detail.append({"item_key": key, "category": cat, "score": s,
-                       "norm": round(norm, 1), "weight": w,
+                       "norm": round(norm, 1), "weight": w, "na": na,
                        "negative": bool(r.get("routing", {}).get("negative_evidence"))})
 
     category_scores = {c: (round(cat_v[c] / cat_w[c], 1) if cat_w.get(c) else None)
