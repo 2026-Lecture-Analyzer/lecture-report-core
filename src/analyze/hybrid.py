@@ -25,7 +25,7 @@ from src.analyze.metrics import (compute_metrics, score_global_metric_item,
 
 # raw 메트릭으로 덮어쓸 결정적 항목 (나머지는 holistic 유지)
 # C1·pace = 정제본이 신호를 지우거나 무뎌지게 함(§8) → raw(merged.text) 기준 규칙 채점.
-METRIC_ITEMS = {"C1_repetition", "C1_completeness", "C1_consistency", "C4_pace"}
+METRIC_ITEMS = {"C1_repetition", "C1_completeness", "C1_consistency", "C4_pace", "C2_review"}
 
 # 근거(evidence) 분리: 점수는 holistic, 근거는 항목별 임베딩 태깅(⑤ eval_tags)에서 top-k.
 # holistic LLM 의 근거 선택이 약하고(엉뚱·중복·비결정적) → 항목별 검색 근거로 교체해
@@ -60,12 +60,13 @@ def attach_retrieval_evidence(row: dict, lec_chunks: list[dict],
     cand = []
     for c in lec_chunks:
         for t in (c.get("eval_tags") or []):
-            # cue(키워드 확정) 있는 태그만 — 순수 임베딩(cue=None)은 오탐 많음(휴식공지·UI 안내 등).
-            if t.get("item_key") == key and t.get("cue"):
+            # exemplar 임베딩(§ITEM_EXEMPLARS) 도입 후 sim 변별력이 커져 cue 없는 임베딩
+            # 매칭도 신뢰 가능(예: '인서트문 실행' = 실습). score(=sim+cue보너스) top-k 로 추린다.
+            if t.get("item_key") == key:
                 cand.append((t.get("score", t.get("sim", 0)), c, t.get("cue", "")))
                 break
     if not cand:
-        return False
+        return False   # 신뢰 매칭 없음 → holistic LLM 근거 유지(C5_example 처럼 LLM이 잘 집는 경우 보존)
     cand.sort(key=lambda x: -(x[0] or 0))
     row["evidence"] = [{"chunk_id": c["chunk_id"], "time": (c.get("start_time") or "")[:5],
                         "quote": _snippet(c.get("clean_text", ""), cue)}

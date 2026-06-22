@@ -90,6 +90,8 @@ def compute_metrics(blocks: list[dict], clean_text: str = "",
                     + len(re.findall(config.C5_ENGAGE_GACHI, text)))
     check_per10 = check_cue_n / elapsed_min * 10
     engage_per10 = engage_cue_n / elapsed_min * 10
+    # C2_review 복습 cue(raw 기준, 강의당 총 횟수) — LLM 이 흩어진 복습 신호를 놓침.
+    review_cue_n = sum(text.count(c) for c in config.REVIEW_CUES)
 
     return {
         "pace_cpm": round(pace_cpm, 1),
@@ -103,6 +105,7 @@ def compute_metrics(blocks: list[dict], clean_text: str = "",
         "incomplete_ratio_utt": incomplete_ratio_utt,
         "check_cue_n": check_cue_n,
         "engage_cue_n": engage_cue_n,
+        "review_cue_n": review_cue_n,
         "check_per10": round(check_per10, 2),
         "engage_per10": round(engage_per10, 2),
         "n_blocks": len(blocks),
@@ -133,7 +136,7 @@ def score_metric_item(item_key: str, metrics: dict) -> dict:
         cpm = metrics.get("pace_cpm", 0)
         lo, hi = config.PACE_CPM_LOW, config.PACE_CPM_HIGH
         if lo <= cpm <= hi:
-            score, note = 5, "적절"
+            score, note = 4, "적절"   # 넓은 범위 안=양호. 우수(5)는 cpm만으론 보장 못 함(만연체·탈선 미반영)
         elif cpm < lo:
             score, note = 3, "다소 느림"
         else:
@@ -158,6 +161,15 @@ def score_metric_item(item_key: str, metrics: dict) -> dict:
                 "comment": f"필러율 {rate} ({metrics.get('filler_n')}회), 최다 '{top}' "
                            f"{metrics.get('max_filler_rate')} — {note} "
                            f"(기준 율>{hi}|지배>{dom}, §2차 보정 대상)"}
+
+    if item_key == "C2_review":        # 전날 복습 연계 — 복습 cue 빈도(LLM 이 흩어진 신호 놓침)
+        n = metrics.get("review_cue_n", 0)
+        b1, b2, b3 = config.REVIEW_CUE_BANDS
+        score = 1 if n < b1 else 2 if n < b2 else 3 if n < b3 else 4
+        note = {1: "복습 신호 없음", 2: "미흡", 3: "보통", 4: "양호"}[score]
+        return {"score": score, "value": {"name": "review_cue_n", "value": n},
+                "comment": f"복습 연계 표현 {n}회 — {note} "
+                           f"(지난 시간/앞에서/배웠던 등 raw 기준)"}
 
     # ── [legacy] C5_check / C5_engage — 신(新) 기준에서 삭제된 항목 ──
     # 신 기준 CHECKLIST·METRIC_ITEMS 에 없으므로 호출되지 않는다(구 기준 비교용으로만 보존).
@@ -210,7 +222,7 @@ def score_global_metric_item(item_key: str, metrics: dict) -> dict | None:
         if iu is not None:
             # gold(02-02 0.084·02-06 0.099 = 둘 다 3) 보정. 발화단위 분포 0.084~0.119.
             if iu < 0.06:
-                score, note = 5, "문장 완결성 우수"
+                score, note = 4, "양호"   # 미완결 적음=양호. 우수(5)는 발화-종결 신호만으론 단정 못 함
             elif iu < 0.08:
                 score, note = 4, "양호"
             elif iu < 0.115:
@@ -223,7 +235,7 @@ def score_global_metric_item(item_key: str, metrics: dict) -> dict | None:
         if ir is None:
             return None
         if ir < 0.1:
-            score, note = 5, "문장 완결성 우수"
+            score, note = 4, "양호"   # 메트릭만으론 우수(5) 단정 안 함
         elif ir < 0.25:
             score, note = 4, "양호"
         else:
