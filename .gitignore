@@ -1,13 +1,15 @@
 # ===== 제공 데이터 (외부 공유/업로드 금지 · 절대 커밋 금지) =====
 # 강의 스크립트, 메타데이터, 품질평가 체크리스트, 기본 README 등 일체
 AI_Lecture_Analysis_Report_Generator/
-
+AI_Lecture_Analysis_Report_Generator
+data/
 # ===== 환경 변수 / API 키 =====
 .env
 .env.*
+# 키 값 비운 템플릿은 추적(시크릿 아님)
+!.env.example
 *.key
 secrets.*
-
 # ===== Python =====
 __pycache__/
 *.py[cod]
@@ -16,13 +18,17 @@ __pycache__/
 .venv/
 venv/
 env/
-
 # ===== 분석 산출물 (원본 데이터 파생물 — 필요 시만 선별 커밋) =====
 outputs/
 reports/
 *.local.*
-
 # ===== OS / 에디터 =====
 .DS_Store
 .idea/
 .vscode/
+# ===== Claude Code (로컬 도구 설정 — 세션별 권한 노이즈) =====
+.claude/settings.json
+.claude/settings.local.json
+#===== 중간보고 git ignore 추가 =====
+docs/중간보고/**
+docs/blog/

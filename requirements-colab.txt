@@ -1,8 +1,13 @@
-# Colab(A100) 전용 — Step 3~5 모델 추론(Solar-10.7B). GPU 필요.
+# Colab 전용 — Step 3~5 모델 추론. GPU 는 hf 백엔드(SOLAR-10.7B)·KURE 임베딩에 필요.
 # Colab 노트북 첫 셀에서 설치. torch는 Colab 기본 제공본을 그대로 쓰는 걸 권장
 # (런타임 CUDA와 어긋나면 재설치 깨짐). 아래는 추론에 필요한 추가분.
+# Upstage API 백엔드만 쓰면 transformers/accelerate 없이 openai 만 있어도 정제 가능.
+openai==2.41.0
+python-dotenv==1.2.2
 transformers==4.46.3
 accelerate==1.1.1
 sentencepiece==0.2.0
+# 임베딩(KURE) — 토픽 분할·태깅 (§5/§9)
+sentence-transformers==3.3.1
 # 메모리 빠듯할 때만 (A100 40GB는 fp16로 충분, 보통 불필요)
 # bitsandbytes==0.44.1
