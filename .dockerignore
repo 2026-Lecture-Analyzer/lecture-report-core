@@ -1,0 +1,22 @@
+# 배포 이미지에서 제외 — 비공개 데이터·로컬 산출물은 절대 올리지 않음.
+
+# 🔒 비공개 강의 데이터 (김영아 강사 등) — 배포 금지
+AI_Lecture_Analysis_Report_Generator/
+reports/            # 로컬 단일테넌트 보고서(kdt-김영아 포함)
+workspaces/         # 로컬 워크스페이스 데이터(배포는 /data 볼륨 사용)
+# (eval/ 은 빌드 컨텍스트 core/ 밖이라 자동 제외됨)
+
+# 비밀/환경
+.env
+.streamlit/secrets.toml
+
+# 로컬 산출물·캐시
+.venv/
+outputs/
+notebooks/
+**/__pycache__/
+**/*.pyc
+.git/
+.DS_Store
+*.md
+!README.md

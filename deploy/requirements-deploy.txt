@@ -1,0 +1,3 @@
+# 배포 전용 추가 의존성(로컬 requirements.txt 위에 더함)
+# Streamlit 네이티브 OIDC(st.login/구글 로그인)에 필요
+Authlib==1.4.1
