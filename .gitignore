@@ -33,4 +33,4 @@ workspaces/
 .claude/settings.local.json
 #===== 중간보고 git ignore 추가 =====
 docs/중간보고/**
-docs/blog/**
+docs/blog/
