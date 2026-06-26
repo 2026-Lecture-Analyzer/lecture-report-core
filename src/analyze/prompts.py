@@ -173,11 +173,15 @@ def judge_prompt(item: dict, chunks: list[dict], context_chunks: list[dict] = No
     body = _render_chunks(chunks)
     ctx = ""
     if context_chunks:
-        ctx = ("\n[참고 문맥(채점 대상 아님, 경계 이해용)]\n"
+        ctx = ("\n[참고 문맥]\n"
+               "앞뒤 의미 연결을 판단하기 위한 문맥이다. "
+               "문맥 안에 실제 근거가 있으면 evidence 로 인용할 수 있다.\n"
                + _render_chunks(context_chunks, extra_label="ctx"))
+    guide = ITEM_GUIDES.get(item["key"], "")
     user = (
         f"[평가 항목] {CATEGORIES[item['category']]} > {item['title']}\n"
         f"[판정 기준] {item['description']}\n"
+        f"[항목별 추가 기준]\n{guide or '(없음)'}\n"
         f"[채점 척도] {_SCALE}\n\n"
         f"[강의 발췌]\n{body}{ctx}\n\n"
         f"위 항목을 채점하고 아래 JSON 으로만 답하라. evidence 의 chunk_id 는 발췌 번호.\n"
@@ -194,20 +198,57 @@ def global_prompt(item: dict, overview: dict, metrics: dict, sample_chunks: list
     msig = (f"존댓말비율 {hr} (1.0=완전 존댓말 일관 · 0.5=반반 혼용), "
             f"미완결문장비율 {ir} (낮을수록 문장 완결), "
             f"분당 {metrics.get('pace_cpm')}자")
-    guide = ("[지표 해석] 언어 일관성: 존댓말비율 0.9+면 대체로 일관(일부 혼용은 4점), "
-             "0.7~0.9 다소 혼용(3점), 0.7 미만 비일관(1~2점). "
-             "발화 완결성: 미완결비율 0.1 미만 우수(5점), 0.1~0.25 양호(4점), 0.25+ 미흡. "
-             "※ 일부 인용에 보이는 혼용 1~2건만으로 과도하게 감점하지 말 것 — 비율을 우선한다.")
+    # 이지선 추가 : 기존 guide -> metric_guide 로 이름 변경
+    metric_guide = ("[지표 해석] 언어 일관성: 존댓말비율 0.9+면 대체로 일관(일부 혼용은 4점), "
+                "0.7~0.9 다소 혼용(3점), 0.7 미만 비일관(1~2점). "
+                "발화 완결성: 미완결비율 0.1 미만 우수(5점), 0.1~0.25 양호(4점), 0.25+ 미흡. "
+                "※ 일부 인용에 보이는 혼용 1~2건만으로 과도하게 감점하지 말 것 — 비율을 우선한다.")
+    item_guide = ITEM_GUIDES.get(item["key"], "")       # 추가 : llm 프롬프트에 "C2_structure" 추가 위함
     sample = _render_chunks(sample_chunks)
     user = (
         f"[평가 항목] {CATEGORIES[item['category']]} > {item['title']}\n"
         f"[판정 기준] {item['description']}\n"
+        f"[항목별 추가 기준]\n{item_guide or '(없음)'}\n"       # 추가 : llm 프롬프트에 "C2_structure" 추가 위함
         f"[채점 척도] {_SCALE}\n\n"
         f"[강의 개요] 키워드: {kw} / 주제: {outline}\n"
         f"[전역 지표] {msig}\n"
-        f"{guide}\n"
+        f"{metric_guide}\n"     # 수정
         f"[본문 샘플(흐름·어투 파악용)]\n{sample}\n\n"
         f"위 항목은 강의 전체의 구조/일관성을 보는 항목이다. 지표를 우선 근거로, 샘플은 보조로 "
         f"종합 채점하고 아래 JSON 으로만 답하라.\n{_JSON_SPEC}"
     )
     return [{"role": "system", "content": _JUDGE_SYS}, {"role": "user", "content": user}]
+
+
+# ── 태그 0개 교차검증 ──────────────────────────────────────────────────
+# 태깅(키워드+임베딩)이 후보를 0개 잡았을 때, 곧장 '부재(1점)'로 단정하면
+# false negative 위험이 있다(태깅이 놓쳤을 뿐 실제로는 있을 수 있음).
+# 균등 샘플 몇 개를 LLM 에 보여주고 "정말 없는지" 한 번 더 확인한다.
+_CROSS_SYS = (
+    "너는 IT 강의 평가자다. 특정 평가 항목에 해당하는 내용이 아래 발췌에 "
+    "조금이라도 나타나는지만 판단한다. 키워드 검색이 놓쳤을 가능성을 고려해 "
+    "표현이 달라도 의미가 맞으면 '있음'으로 본다. 반드시 JSON 으로만 답한다."
+)
+
+_CROSS_JSON = (
+    '{"found": true/false, "score": 1~5 정수, '
+    '"verdict": "우수/양호/보통/미흡/없음 중 하나", '
+    '"evidence": [{"chunk_id": 정수, "quote": "발췌 원문 인용"}], '
+    '"comment": "한두 문장", "needs_more": false}'
+)
+
+
+def cross_check_prompt(item: dict, sample_chunks: list[dict]) -> list[dict]:
+    """태그 0개 항목의 교차검증. 샘플에서 항목 근거가 실제로 있는지 재확인."""
+    guide = ITEM_GUIDES.get(item["key"], "")
+    body = _render_chunks(sample_chunks)
+    user = (
+        f"[평가 항목] {CATEGORIES[item['category']]} > {item['title']}\n"
+        f"[판정 기준] {item['description']}\n"
+        f"[항목별 추가 기준]\n{guide or '(없음)'}\n\n"
+        f"[강의 샘플]\n{body}\n\n"
+        f"이 항목에 해당하는 내용이 위 샘플에 나타나는지 판단하라. "
+        f"있으면 found=true 와 함께 채점하고, 정말 없으면 found=false 로 답하라.\n"
+        f"{_CROSS_JSON}"
+    )
+    return [{"role": "system", "content": _CROSS_SYS}, {"role": "user", "content": user}]

@@ -75,15 +75,57 @@ def make_upstage_embed_fn(api_key: str = None, model: str = None,
     return embed_fn
 
 
+# ── Google Gemini 임베딩 백엔드 (google-genai SDK) ──────────────────────
+def make_google_embed_fn(api_key: str = None, model: str = None,
+                         batch_size: int = 100, dim: int = None):
+    """Google Gemini 임베딩 embed_fn. texts -> L2 정규화 np.ndarray[n, d].
+
+    키: 인자 > 환경변수 GOOGLE_API_KEY(.env 자동 로드). 다운로드·GPU 불필요.
+    dim 지정 시 output_dimensionality 축소(축소하면 재정규화 권장 → 여기서 L2 처리).
+    입력은 batch_size 단위로 쪼개 호출(요청당 입력 수 제한 대응).
+    """
+    from google import genai
+    from google.genai import types
+
+    api_key = api_key or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "GOOGLE_API_KEY 가 없습니다. .env 에 GOOGLE_API_KEY=... 를 넣거나 "
+            "환경변수로 export 하세요(https://aistudio.google.com/apikey)."
+        )
+    client = genai.Client(api_key=api_key)
+    model = model or config.GOOGLE_EMBED_MODEL
+    dim = dim if dim is not None else config.GOOGLE_EMBED_DIM
+
+    def embed_fn(texts: list[str]) -> np.ndarray:
+        texts = list(texts)
+        if not texts:
+            return np.zeros((0, 0), dtype=np.float32)
+        cfg = types.EmbedContentConfig(output_dimensionality=dim) if dim else None
+        vecs: list = []
+        for i in range(0, len(texts), batch_size):
+            resp = client.models.embed_content(
+                model=model, contents=texts[i:i + batch_size], config=cfg)
+            vecs.extend(e.values for e in resp.embeddings)
+        arr = np.asarray(vecs, dtype=np.float32)
+        arr /= (np.linalg.norm(arr, axis=1, keepdims=True) + 1e-9)
+        return arr
+
+    return embed_fn
+
+
 def make_embedder_fn(backend: str = None, **kwargs):
     """임베딩 백엔드 디스패처 — config.EMBED_BACKEND 기본.
 
     "upstage" → make_upstage_embed_fn(**kwargs)
+    "google"  → make_google_embed_fn(**kwargs)
     "kure"    → make_embed_fn(load_embedder()) (kwargs 무시, ~2GB 다운로드)
     """
     backend = backend or config.EMBED_BACKEND
     if backend == "upstage":
         return make_upstage_embed_fn(**kwargs)
+    if backend == "google":
+        return make_google_embed_fn(**kwargs)
     if backend == "kure":
         return make_embed_fn(load_embedder())
-    raise ValueError(f"알 수 없는 EMBED_BACKEND: {backend!r} (kure|upstage)")
+    raise ValueError(f"알 수 없는 EMBED_BACKEND: {backend!r} (kure|upstage|google)")

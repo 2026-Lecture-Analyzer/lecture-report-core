@@ -146,7 +146,7 @@ def main() -> None:
                            "embed_model": (config.UPSTAGE_EMBED_MODEL if eb == "upstage"
                                            else config.EMBED_MODEL_ID),
                            "section_max_chars": config.SECTION_MAX_CHARS,
-                           "tag_sim_threshold": config.TAG_SIM_THRESHOLD, "seed": config.SEED},
+                           "tag_retrieve_floor": config.TAG_RETRIEVE_FLOOR, "seed": config.SEED},
                    stats={"refine": stats_refine, "chunk": stats_chunk}, inputs=[args.merged])
     print(f"\n✅ 완료 — clean {stats_refine.get('new', 0)}신규 / chunks {stats_chunk['chunks']}건")
     if chunks:

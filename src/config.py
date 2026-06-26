@@ -46,11 +46,17 @@ MERGE_GAP_SEC = 20.0
 MERGE_MAX_BLOCK_SEC = 150.0
 MERGE_MAX_BLOCK_CHARS = 2000
 
+# ── LLM 제공자 스위치 ──────────────────────────────────────────────────
+# .env 의 LLM_BACKEND 로 생성·임베딩 백엔드를 한 번에 전환(코드 수정 불필요):
+#   "upstage" : Upstage Solar API   (UPSTAGE_API_KEY)  — 현재 기본
+#   "google"  : Google Gemini API   (GOOGLE_API_KEY)   — 키 받으면 .env 한 줄로 전환
+# 생성/임베딩을 서로 다른 제공자로 섞으려면 .env 에 MODEL_BACKEND / EMBED_BACKEND 를 개별 지정.
+LLM_BACKEND = os.environ.get("LLM_BACKEND", "upstage")
+
 # ── 정제/모델(Step 3~5) 백엔드 ─────────────────────────────────────────
-# Solar 를 어디서 돌릴지 선택(둘 다 generate_fn(messages)->str 동일 인터페이스):
-#   "hf"      : HuggingFace 오픈모델(SOLAR-10.7B-Instruct) — Colab GPU 필요
-#   "upstage" : Upstage Solar API(클라우드) — UPSTAGE_API_KEY 필요, GPU 불필요(로컬 가능)
-MODEL_BACKEND = "upstage"
+# 모두 generate_fn(messages)->str 동일 인터페이스. 값: upstage | google | hf
+#   "hf" : HuggingFace 오픈모델(SOLAR-10.7B-Instruct) — Colab GPU 필요
+MODEL_BACKEND = os.environ.get("MODEL_BACKEND", LLM_BACKEND)
 
 # (hf 백엔드) HuggingFace 오픈모델
 MODEL_ID = "upstage/SOLAR-10.7B-Instruct-v1.0"
@@ -62,6 +68,10 @@ MODEL_REVISION = None
 # 엔드포인트·모델명은 Upstage 콘솔/문서 기준(바뀌면 여기만 수정).
 UPSTAGE_BASE_URL = "https://api.upstage.ai/v1"
 UPSTAGE_MODEL = "solar-pro2"   # 대안: solar-pro, solar-mini
+
+# (google 백엔드) Google Gemini API — google-genai SDK. 키는 .env 의 GOOGLE_API_KEY.
+# 모델명은 가이드 기준(바뀌면 여기만 수정). flash=속도·비용 균형, pro=고품질, flash-lite=대량·저비용.
+GOOGLE_MODEL = "gemini-2.5-flash"   # 대안: gemini-2.5-pro, gemini-2.5-flash-lite
 
 # 결정적 생성(재현성): 그리디/temperature=0 + 시드 고정.
 GEN_MAX_NEW_TOKENS = 1024
@@ -75,12 +85,18 @@ SECTION_MAX_CHARS = 2500
 CONTEXT_SUMMARY_MAX_CHARS = 400
 
 # ── 임베딩(태깅·청킹, Step 5 / §9) ─────────────────────────────────────
-# 백엔드 선택(둘 다 embed_fn(texts)->np.ndarray[n,d] 동일 인터페이스):
+# 백엔드 선택(모두 embed_fn(texts)->np.ndarray[n,d] L2정규화 동일 인터페이스):
 #   "kure"    : nlpai-lab/KURE-v1 (sentence-transformers) — 품질 1순위(§11), GPU 권장·CPU 가능, ~2GB 다운로드
 #   "upstage" : Upstage 임베딩 API — 다운로드·GPU 불필요(UPSTAGE_API_KEY). openai 패키지만 있으면 로컬 OK
-EMBED_BACKEND = "upstage"
+#   "google"  : Google Gemini 임베딩 API — 다운로드·GPU 불필요(GOOGLE_API_KEY). google-genai 패키지 필요
+# 기본은 LLM_BACKEND 따라감(google 키로 전환하면 임베딩도 함께 google).
+EMBED_BACKEND = os.environ.get("EMBED_BACKEND", LLM_BACKEND)
 EMBED_MODEL_ID = "nlpai-lab/KURE-v1"          # (kure) 대안: BAAI/bge-m3, BM-K/KoSimCSE-roberta
 UPSTAGE_EMBED_MODEL = "embedding-passage"     # (upstage) 대안: solar-embedding-1-large-passage
+GOOGLE_EMBED_MODEL = "gemini-embedding-001"   # (google) GA, 최대 3072차원
+GOOGLE_EMBED_DIM = None                        # None=모델 기본(3072). 축소하려면 정수(예: 1024)
+# ⚠ 태깅 floor(TAG_RETRIEVE_FLOOR=0.45 등)는 upstage 임베딩 분포 기준 캘리브레이션값.
+#   google 임베딩으로 바꾸면 유사도 분포가 달라 floor 재조정이 필요할 수 있음(§9 재캘리브레이션).
 # 임베딩 기반 토픽 분할(TextTiling-lite)
 SEG_DEPTH_C = 0.4        # 경계 임계: depth > mean + c*std
 SEG_MIN_SENTS = 3        # 청크 최소 문장 수
@@ -110,7 +126,43 @@ ANALYZE_SELF_CONSISTENCY = 1 # 항목당 LLM 채점 반복수(>1=다수결, 비�
 ANALYZE_SC_TEMPERATURE = 0.4 # self-consistency 샘플 다양성용 온도(반복수>1일 때)
 PACE_CPM_LOW = 300           # 발화속도 적정 하한(분당 글자) — 잠정
 PACE_CPM_HIGH = 700          # 적정 상한 — 잠정
-FILLER_RATE_HIGH = 0.15      # 필러율 '높음' 기준 — 잠정
+# 필러율 기준 — gold(02-02) 보정: 실측 raw 필러율 ~5.7%가 사람 채점 '잦음(2점)'.
+# 0.15(15%)는 비현실적(실제 강의가 그 수준에 도달 안 함)이라 0.06으로 하향.
+FILLER_RATE_HIGH = 0.06
+# 지배 필러 — 단일 필러가 전체 어절의 이 비율 초과면 '특정 표현 과반복'(예: '이렇게' 1.76%).
+# C1_repetition 은 총 필러율 OR 지배 필러 둘 중 하나만 넘어도 감점(둘 다 §2차 보정 대상).
+FILLER_DOMINANT_HIGH = 0.015
+
+# ── C5 상호작용 raw cue (docs/고도화/01 §9-2 정정) ──────────────────────
+# refine 가 clean_text 에서 구어체 이해확인·참여유도 표현을 지워(되셨어요 20→0 등)
+# holistic 이 "없음"으로 과소평가. raw(merged.text)에서 cue 빈도로 직접 채점한다.
+C5_CHECK_CUES = [          # 이해 확인 질문(C5_check)
+    "되셨어요", "되셨나요", "되시나요", "됐어요", "됐나요", "이해 가", "이해하셨",
+    "이해되", "아시겠", "알겠", "맞죠", "맞쥬", "그쵸", "그죠", "괜찮으세요",
+    "보이세요", "보이시", "따라오셨",
+]
+C5_ENGAGE_CUES = [         # 참여 유도(C5_engage) — 청자 행동 요청
+    "해보세요", "해 보세요", "해보실", "해봅시다", "풀어보", "풀어 보",
+    "입력해", "작성해보", "작성해 보", "실행해보", "만들어보", "만들어 보",
+    "따라 해", "따라치",
+]
+# '같이'는 substring 오탐 심함(똑같이·함께 의미). 행동동사 앞일 때만 참여유도로 카운트(정규식).
+C5_ENGAGE_GACHI = r"같이\s*(?:해|풀|보|만들|입력|작성|실행|읽|돌려|쳐|치)"
+# 10분당 cue 빈도 임계 (lo, mid, hi): 0→1점 · <lo→2 · [lo,mid]→3(보통) · (mid,hi]→4 · >hi→5
+# engage lo: '같이' 오탐 제거 후 재보정(0.3→0.15) — gold 5건(엔게이지 0.19~0.73/10분)이 전부 3점.
+C5_CHECK_PER10 = (0.5, 3.0, 6.0)
+C5_ENGAGE_PER10 = (0.15, 2.5, 5.0)
+
+# ── C2_review 복습 연계 cue (raw 기준) ─────────────────────────────────
+# holistic LLM 이 강의 곳곳에 흩어진 복습 신호를 체계적으로 놓쳐 1~2점만 줌(gold 대비 MAE 2.1).
+# 복습 표현은 distinctive 하고 gold 점수와 상관 → cue 카운팅(결정적)으로 직접 채점한다.
+REVIEW_CUES = [
+    "지난 시간", "지난주", "지난 주", "저번", "어제", "앞에서", "아까", "이전 시간",
+    "복습", "학기 초반", "초반에", "첫 번째 시간", "첫째 시간", "예전에", "배웠", "배운",
+    "나왔던", "다뤘던", "살펴봤", "했었", "설명드렸", "얘기했",
+]
+# 강의당 복습 cue 총 횟수 → 점수: 0=없음(1) · 1~2=미흡(2) · 3~5=보통(3) · 6+=양호(4)
+REVIEW_CUE_BANDS = (1, 3, 6)   # (미흡상한, 보통하한, 양호하한)
 
 # ── 도메인 상수 ────────────────────────────────────────────────────────
 # 오전/오후 세션 경계 (메타데이터: 오전 09:00~12:00, 오후 13:00~18:00)

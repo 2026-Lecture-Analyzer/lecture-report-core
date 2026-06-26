@@ -9,5 +9,10 @@ jupyter==1.1.1
 # Upstage Solar API 백엔드(GPU 불필요 → 로컬 정제 가능) + .env 자동 로드
 openai==2.41.0
 python-dotenv==1.2.2
+# Google Gemini API 백엔드(LLM_BACKEND=google). GPU 불필요, GOOGLE_API_KEY 필요
+google-genai==2.8.0
 # 리포트 PDF 변환(⑧, 한글 TTF 필요 — macOS AppleGothic / Linux NanumGothic)
 reportlab==4.5.1
+# 대시보드(⑧, P4) — 1.58.0부터 pandas 3 지원(1.45.1은 pandas<3 강제라 pandas==3.0.3과 충돌)
+streamlit==1.58.0
+plotly==6.8.0
