@@ -56,6 +56,8 @@ def load_gold(paths: list[Path]) -> dict[str, dict[str, int]]:
                 if not line.strip():
                     continue
                 d = json.loads(line)
+                if d.get("na") or d.get("score") is None:
+                    continue
                 key = _gold_key(d)
                 item_id = _KEY_MAP.get(d["item_id"], d["item_id"])
                 gold[key][item_id] = d["score"]
