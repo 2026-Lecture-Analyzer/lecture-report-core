@@ -74,8 +74,8 @@ def main():
     cov = coverage(chunks)
     tagged_items = {k for k, v in cov.items() if v > 0}
     print("태깅된 항목:", sorted(tagged_items))
-    # cue 기반 최소 기대: 도입(목표/복습)·국소(정의/비유/실습/오류/이해확인)·종료(요약)
-    for must in ["C2_objective", "C3_definition", "C4_practice", "C5_check", "C2_summary"]:
+    # cue 기반 최소 기대: 도입(목표)·국소(정의/예시/실습)·종료(요약). (체크리스트 재편 후 항목명)
+    for must in ["C2_objective", "C3_definition", "C5_practice", "C5_example", "C2_summary"]:
         assert must in tagged_items, f"{must} 태깅 실패"
 
     # 위치 게이트: 청크 2개 이상이면 objective(도입)이 summary(종료)보다 앞 chunk

@@ -15,9 +15,11 @@ import plotly.graph_objects as go
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # core/ → src import
+from service import keys as keymod
 from service.constants import (CAT_COLORS, CAT_NAME, CATS, ITEM_META, ITEM_ORDER,
                                SCORE_COLOR, cat_avg)
 from service.store import Report
+from src.report.coaching import build_coaching_report
 
 try:
     from src.report.highlight_component import render_highlight
@@ -103,7 +105,8 @@ def render_report(rpt: Report) -> None:
         cols[3].metric("최고 세션", best[0][5:])
 
     tab_labels = ["📈  시계열 추이"] + (["🌗  오전 vs 오후"] if is_ampm else []) + \
-                 ["🔍  세션 상세 (근거·원문)", "📋  세션 매트릭스"]
+                 ["🔍  세션 상세 (근거·원문)", "📋  세션 매트릭스",
+                  "🎯  강사 코칭", "📊  수강생 피드백", "🆚  AI vs 학생"]
     tabs = st.tabs(tab_labels)
     ti = iter(tabs)
 
@@ -123,6 +126,18 @@ def render_report(rpt: Report) -> None:
     # ══ 매트릭스 ══
     with next(ti):
         _tab_matrix(keys, smat, week_of)
+
+    # ══ 강사 코칭 ══
+    with next(ti):
+        _tab_coaching(rpt)
+
+    # ══ 수강생 피드백 ══
+    with next(ti):
+        _tab_feedback(rpt)
+
+    # ══ AI vs 학생 ══
+    with next(ti):
+        _tab_compare(rpt)
 
 
 def _tab_timeseries(keys, dates, smat, week_of, weeks):
@@ -293,3 +308,274 @@ def _tab_matrix(keys, smat, week_of):
     st.dataframe(df.style.background_gradient(subset=["종합"] + CATS, cmap="RdYlGn", vmin=1, vmax=5),
                  use_container_width=True, hide_index=True, height=560)
     st.caption("색이 진한 초록=높음, 빨강=낮음.")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 강사 코칭 · 수강생 피드백 (CLI 기능을 보고서 탭으로)
+# ══════════════════════════════════════════════════════════════════════
+def _period(rows: list[dict]) -> str:
+    ds = sorted({r["date"] for r in rows})
+    return f"{ds[0]} ~ {ds[-1]}" if ds else ""
+
+
+# 점수 배지 — 톤다운 틴트(배경, 글자). 솔리드 비비드 대신 절제된 펠릿.
+_SCORE_STYLE = {1: ("#fde8e8", "#d92d20"), 2: ("#fdecd8", "#dc6803"), 3: ("#fdf3d2", "#b54708"),
+                4: ("#dcf5e6", "#067647"), 5: ("#d1f0df", "#05603a")}
+
+
+def _esc(s: str) -> str:
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _tab_coaching(rpt: Report) -> None:
+    """여러 세션 종합 → 강점·개선 우선순위·LLM 코칭(카드형 UI)."""
+    from src.report import coaching as co
+    rows = rpt.load_score_rows()
+    if not rows:
+        st.info("분석된 세션이 없습니다.")
+        return
+    agg = co.aggregate(rows)
+    if not agg:
+        st.info("집계할 점수가 없습니다.")
+        return
+    strengths = co.pick_strengths(agg, 3)
+    priorities = co.pick_priorities(agg, 3)
+    overall = round(mean(it["mean"] for it in agg.values()), 2)
+
+    c = st.columns(3)
+    c[0].metric("종합 강의력", f"{overall} / 5")
+    c[1].metric("대표 강점", strengths[0]["title"] if strengths else "—")
+    c[2].metric("최우선 개선", priorities[0]["title"] if priorities else "—")
+
+    # ── 강점 ──
+    st.markdown('<div class="sec-h">💪 강점</div>', unsafe_allow_html=True)
+    chips = "".join(f'<span class="coach-strength">{_esc(s["title"])} · {s["mean"]}/5 '
+                    f'({s["trend"]:+})</span>' for s in strengths)
+    st.markdown(f"<div>{chips}</div>", unsafe_allow_html=True)
+
+    # ── 개선 우선순위 ──
+    st.markdown('<div class="sec-h">🎯 개선 우선순위</div>', unsafe_allow_html=True)
+    has_keys = keymod.has_keys()
+    use_llm = st.checkbox("🧠 LLM 코칭 생성 (진단·개선법·예시 멘트, 과금)", value=False,
+                          disabled=not has_keys, key=f"coach_llm_{rpt.report_id}")
+    if not has_keys:
+        st.caption("⚠️ LLM 코칭은 사이드바 키 입력 후. 키 없이도 우선순위·근거는 표시됩니다.")
+
+    coachings: dict = {}
+    if use_llm and has_keys:
+        from src.refine.model import make_solar_generate_fn
+        with st.spinner("코칭 생성 중 (LLM)…"):
+            with keymod.applied(keymod.get_keys()):
+                gen = make_solar_generate_fn()
+                for p in priorities:
+                    coachings[p["key"]] = co._coach_one(p, p, gen)
+
+    for i, p in enumerate(priorities, 1):
+        bg, fg = _SCORE_STYLE.get(round(p["mean"]), ("#eef0f3", "#4e5968"))
+        head = (f'<div class="pri-head"><span class="num">{i}</span>'
+                f'<span class="t">{_esc(p["title"])}</span>'
+                f'<span class="badge" style="background:{bg};color:{fg}">{p["mean"]} / 5</span>'
+                f'<span class="tagw">가중 {p["weight"]}</span>'
+                f'<span class="tagw">추이 {p["trend"]:+}</span></div>')
+        evi = p.get("evidence") or p.get("comments") or []
+        evi = sorted(evi, key=lambda e: (e.get("score") or 9))[:3]
+        evi_html = "".join(
+            f'<div class="evi"><span class="tag">{_esc(e.get("date",""))} '
+            f'{_esc(e.get("session",""))} · {e.get("score","")}점</span>'
+            f'{_esc(e.get("quote") or e.get("comment",""))}</div>' for e in evi)
+        c = coachings.get(p["key"])
+        coach_html = ""
+        if c:
+            if c["diagnosis"]:
+                coach_html += (f'<div class="coach-box"><span class="lab">진단</span><br>'
+                               f'{_esc(c["diagnosis"])}</div>')
+            if c["how_to"]:
+                items = "".join(f"<li>{_esc(h)}</li>" for h in c["how_to"])
+                coach_html += f'<div style="margin:.3rem 0"><b>개선 방법</b><ul style="margin:.2rem 0">{items}</ul></div>'
+            if c["example_lines"]:
+                ments = "".join(f'<span class="ment">“{_esc(m)}”</span>' for m in c["example_lines"])
+                coach_html += f'<div style="margin-top:.3rem"><b>바로 쓸 수 있는 멘트</b>{ments}</div>'
+        st.markdown(
+            f'<div class="pri-card">{head}'
+            f'<div class="pri-desc">{_esc(p.get("description",""))}</div>'
+            f'<div class="evi-lab">실제 강의 근거 · 낮은 세션</div>'
+            f'{evi_html}{coach_html}</div>',
+            unsafe_allow_html=True)
+
+
+def _ai_category_means(rows: list[dict]) -> dict:
+    """AI 분석행 → 카테고리별 평균(1~5) + 전체 평균. 학생 평가와 동일 척도로 비교용."""
+    by_cat: dict = {}
+    allv = []
+    for r in rows:
+        s = r.get("score")
+        if isinstance(s, (int, float)):
+            by_cat.setdefault(r["category"], []).append(s)
+            allv.append(s)
+    out = {c: round(mean(v), 2) for c, v in by_cat.items()}
+    out["overall"] = round(mean(allv), 2) if allv else None
+    return out
+
+
+def _ai_item_means(rows: list[dict]) -> dict:
+    """AI 분석행 → 항목별 평균(1~5). 학생 항목별 평가와 비교용."""
+    by: dict = {}
+    for r in rows:
+        s = r.get("score")
+        if isinstance(s, (int, float)):
+            by.setdefault(r["item_key"], []).append(s)
+    return {k: round(mean(v), 2) for k, v in by.items()}
+
+
+def _tab_feedback(rpt: Report) -> None:
+    """공개 설문폼 관리 + 실제 수강생 응답 집계."""
+    import service.feedback_forms as ff
+    rows = rpt.load_score_rows()
+    wid = rpt.dir.parent.parent.name      # ws_root/<wid>/reports/<rid>
+
+    # ── 설문폼 주소 ──
+    st.markdown("##### 📨 평가 설문폼")
+    form = ff.load_form(rpt)
+    if not form:
+        st.caption("학생들에게 보낼 공개 평가 링크를 만드세요. 학생은 로그인 없이 평가만 합니다.")
+        if st.button("🔗 설문폼 주소 만들기", type="primary", key=f"mkform_{rpt.report_id}"):
+            ff.create_form(rpt, wid)
+            st.rerun()
+    else:
+        url = ff.form_url(rpt)
+        st.success("설문폼이 생성됐습니다 — 이 주소를 학생들에게 전달하세요:")
+        st.code(url, language=None)
+        c1, c2 = st.columns([1, 3])
+        active = c1.toggle("폼 열림", value=form.get("active", True), key=f"act_{rpt.report_id}")
+        if active != form.get("active", True):
+            ff.set_active(rpt, active); st.rerun()
+        c2.caption("열림=학생 제출 가능 / 닫힘=마감")
+
+    st.divider()
+    # ── 실제 응답 집계 ──
+    responses = ff.load_responses(rpt)
+    agg = ff.aggregate(responses)
+    st.markdown(f"##### 🙋 수강생 평가 (응답 **{agg['n']}**명)")
+    if agg["n"] == 0:
+        st.info("아직 제출된 평가가 없습니다. 위 설문폼 주소를 학생들에게 공유하세요.")
+        return
+    cols = st.columns(6)
+    cols[0].metric("종합 만족도", agg["overall"])
+    for i, c in enumerate(ff.CAT_KEYS):
+        cols[i + 1].metric(c, agg["by_cat"][c] if agg["by_cat"][c] is not None else "—")
+    df = pd.DataFrame([{"카테고리": f"{c} {agg['cat_names'][c]}", "학생 평균(1~5)": agg["by_cat"][c]}
+                       for c in ff.CAT_KEYS])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    with st.expander("📑 항목별 학생 평가 (18항목)"):
+        idf = pd.DataFrame([{"항목": ITEM_META.get(it["key"], (it["key"],))[0],
+                             "학생 평균(1~5)": agg["by_item"].get(it["key"])} for it in ff.ITEMS])
+        st.dataframe(idf, use_container_width=True, hide_index=True, height=460)
+
+    comments = [r.get("comment", "").strip() for r in responses if r.get("comment", "").strip()]
+    if comments:
+        st.markdown(f"##### 💬 자유 의견 ({len(comments)}개)")
+        if keymod.has_keys() and st.button("🧠 의견 AI 요약 (주제·감성·액션, 과금)",
+                                           key=f"sumcom_{rpt.report_id}"):
+            from src.feedback.summarize import summarize_comments
+            from src.refine.model import make_solar_generate_fn
+            with st.spinner("의견 요약 중 (LLM)…"):
+                with keymod.applied(keymod.get_keys()):
+                    s = summarize_comments(comments, make_solar_generate_fn())
+            if s["summary"]:
+                st.info(f"**전체 감성: {s['overall_sentiment'] or '—'}** — {s['summary']}")
+            for t in s["themes"]:
+                cnt = f" · {t['count']}회" if t["count"] else ""
+                st.markdown(f"- **{t['title']}** ({t['sentiment']}{cnt}) — “{t['quote']}”")
+            if s["actions"]:
+                st.markdown("**개선 액션:**")
+                for a in s["actions"]:
+                    st.markdown(f"  - {a}")
+        elif not keymod.has_keys():
+            st.caption("⚠️ 의견 AI 요약은 사이드바에서 키 입력 후 가능.")
+        with st.expander(f"원문 의견 {len(comments)}개 보기"):
+            for cm in comments[:50]:
+                st.markdown(f"- {cm}")
+
+
+def _tab_compare(rpt: Report) -> None:
+    """AI 평가 vs 학생 평가 차이 — 카테고리별 1~5 척도 비교."""
+    import service.feedback_forms as ff
+    rows = rpt.load_score_rows()
+    if not rows:
+        st.info("분석된 세션이 없습니다.")
+        return
+    agg = ff.aggregate(ff.load_responses(rpt))
+    if agg["n"] == 0:
+        st.info("학생 평가가 있어야 비교할 수 있습니다. **📊 수강생 피드백** 탭에서 설문폼을 공유하세요.")
+        return
+    ai = _ai_category_means(rows)
+    st.caption(f"AI 분석(18항목 → 카테고리 평균) vs 학생 평가 {agg['n']}명 — 둘 다 1~5 척도. "
+               "차이 = 학생 − AI (양수=학생이 더 후함).")
+
+    co = st.columns(3)
+    co[0].metric("AI 종합", ai.get("overall"))
+    co[1].metric("학생 종합", agg["overall"])
+    if ai.get("overall") is not None and agg["overall"] is not None:
+        co[2].metric("차이(학생−AI)", f"{agg['overall'] - ai['overall']:+.2f}")
+
+    rows_tbl, ai_y, st_y, cats = [], [], [], []
+    for c in ff.CAT_KEYS:
+        a, s = ai.get(c), agg["by_cat"][c]
+        diff = round(s - a, 2) if (a is not None and s is not None) else None
+        rows_tbl.append({"카테고리": f"{c} {agg['cat_names'][c]}", "AI": a, "학생": s, "차이(학생−AI)": diff})
+        cats.append(c); ai_y.append(a); st_y.append(s)
+    st.dataframe(pd.DataFrame(rows_tbl), use_container_width=True, hide_index=True)
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(name="AI 평가", x=cats, y=ai_y, marker_color="#6366f1"))
+    fig.add_trace(go.Bar(name="학생 평가", x=cats, y=st_y, marker_color="#f59e0b"))
+    fig.update_layout(barmode="group", height=380, yaxis=dict(range=[0, 5.3], title="점수(1~5)"),
+                      legend=dict(orientation="h", y=-0.2), margin=dict(t=20, b=10))
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 인사이트: 가장 큰 괴리(카테고리)
+    gaps = [(c, agg["by_cat"][c] - ai[c]) for c in ff.CAT_KEYS
+            if agg["by_cat"][c] is not None and ai.get(c) is not None]
+    if gaps:
+        big = max(gaps, key=lambda x: abs(x[1]))
+        who = "학생이 더 후하게" if big[1] > 0 else "AI가 더 후하게"
+        st.info(f"카테고리 최대 괴리: **{big[0]} {agg['cat_names'][big[0]]}** (차이 {big[1]:+.2f}) — {who} 평가.")
+
+    # ── 항목별 비교(괴리 큰 순) ──
+    st.markdown("##### 항목별 비교 (괴리 큰 순)")
+    ai_item = _ai_item_means(rows)
+    irows = []
+    for it in ff.ITEMS:
+        a, s = ai_item.get(it["key"]), agg["by_item"].get(it["key"])
+        diff = round(s - a, 2) if (a is not None and s is not None) else None
+        irows.append({"항목": ITEM_META.get(it["key"], (it["key"],))[0],
+                      "AI": a, "학생": s, "차이(학생−AI)": diff})
+    irows.sort(key=lambda x: -(abs(x["차이(학생−AI)"]) if x["차이(학생−AI)"] is not None else -1))
+    st.dataframe(pd.DataFrame(irows), use_container_width=True, hide_index=True, height=460)
+    st.caption("AI가 박하게 본 항목(차이 양수 큼)일수록 학생 체감과 가장 벌어진 곳 — 코칭·재캘리브레이션 후보.")
+
+    # ── 🔧 캘리브레이션 제안(학생=ground-truth, |차이|≥1.0) ──
+    from src.analyze.checklist import by_key
+    meta = by_key()
+    sugg = []
+    for it in ff.ITEMS:
+        a, s = ai_item.get(it["key"]), agg["by_item"].get(it["key"])
+        if a is None or s is None or abs(s - a) < 1.0:
+            continue
+        m = meta.get(it["key"], {})
+        title, etype = m.get("title", it["key"]), m.get("eval_type", "")
+        if s - a > 0:      # AI 박함 → 완화
+            how = "메트릭 임계 완화" if etype == "metric" else "프롬프트(ITEM_GUIDES)에 '약한 신호도 인정' 가이드 추가"
+            sugg.append((abs(s - a), f"🔼 **{title}** — AI가 {s - a:+.1f} 박함 → {how}"))
+        else:              # AI 후함 → 강화
+            how = "메트릭 임계 강화" if etype == "metric" else "프롬프트에 '명시적 근거 필요' 기준 강화"
+            sugg.append((abs(s - a), f"🔽 **{title}** — AI가 {s - a:+.1f} 후함 → {how}"))
+    sugg.sort(reverse=True)
+    st.markdown("##### 🔧 캘리브레이션 제안")
+    if sugg:
+        st.caption("학생 평가를 기준(ground-truth)으로, AI와 |차이|≥1.0 항목의 보정 방향 (human-in-the-loop).")
+        for _, line in sugg[:8]:
+            st.markdown(f"- {line}")
+    else:
+        st.success("AI와 학생 평가가 모든 항목 ±1.0 이내 — 캘리브레이션 불필요.")

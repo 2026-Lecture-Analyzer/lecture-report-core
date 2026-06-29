@@ -98,6 +98,40 @@ def _group(rows: list[dict], chunks: list[dict], mode: str) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════
+# 음성/영상 업로드 → STT 대본 (Gemini, BYO 키)
+# ══════════════════════════════════════════════════════════════════════
+AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg",
+              ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v")
+
+
+def is_media_name(name: str) -> bool:
+    return Path(name).suffix.lower() in AUDIO_EXTS
+
+
+def audio_to_transcript(upload, *, date: str, course: str, start_time: str = None,
+                        log=print) -> str:
+    """업로드된 오디오/영상 → STT 대본 텍스트(`<HH:MM:SS> 화자ID: text`).
+
+    Gemini 오디오 네이티브 전사(STT_BACKEND=google) — **keymod.applied 안에서 호출**해야
+    BYO GOOGLE_API_KEY 가 주입된다. ffmpeg 필요(영상 오디오추출·청크).
+    반환 대본은 run_real(raw_text) 에 그대로 넣을 수 있다.
+    """
+    import tempfile
+    from src.stt.model import make_transcribe_fn
+    from src.stt.transcribe import transcribe_media
+
+    suffix = Path(upload.name).suffix.lower()
+    work = Path(tempfile.mkdtemp(prefix="stt_upload_"))
+    src = work / f"input{suffix}"
+    src.write_bytes(upload.getvalue())
+    tfn = make_transcribe_fn()                       # google(Gemini) — config.STT_BACKEND
+    out = transcribe_media(src, date=date, course=course, transcribe_fn=tfn,
+                           out_dir=work, work_dir=work / "stt",
+                           start_time=start_time, log=log)
+    return out.read_text(encoding="utf-8")
+
+
+# ══════════════════════════════════════════════════════════════════════
 # 보고서에 반영
 # ══════════════════════════════════════════════════════════════════════
 def ingest(report: Report, grouped: dict, *, subject: str = "", source_file: str = "",

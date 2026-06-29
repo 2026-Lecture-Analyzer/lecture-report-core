@@ -78,6 +78,18 @@ GEN_MAX_NEW_TOKENS = 1024
 GEN_DO_SAMPLE = False
 SEED = 42
 
+# ── STT(Step -1, 음성/영상 → transcript txt) ───────────────────────────────
+# 녹화 파일(오디오/영상)을 Gemini 오디오 네이티브로 전사+화자분리해, 기존 파이프라인
+# 입력과 동일한 `<HH:MM:SS> 화자ID(hex): 텍스트` transcript txt 를 만든다(parse 그대로 재사용).
+STT_BACKEND = os.environ.get("STT_BACKEND", "google")  # 현재 google(Gemini)만 지원
+STT_MODEL = "gemini-2.5-flash"      # 오디오 이해 모델. 대안: gemini-2.5-pro(고품질·고가)
+STT_CHUNK_SEC = 600                 # 긴 강의를 이 길이(초)로 잘라 전사(토큰·정확도 안정). 0=통째
+STT_CHUNK_OVERLAP_SEC = 5           # 청크 경계에서 발화 잘림 방지용 겹침(초)
+STT_START_TIME = "09:00:00"         # transcript 타임스탬프 기준 월클럭(녹화 시작 시각). 세션분할·to_24h 호환
+STT_MAX_TOKENS = 8192               # 청크당 전사 출력 토큰 상한(10분 발화 여유)
+STT_AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg")
+STT_VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".webm", ".avi")
+
 # Step 4 정제: 인접 블록을 묶는 섹션 최대 글자 수(맥락 보존 단위).
 # Solar 4k 컨텍스트 + 용어집/이전요약/출력 여유를 고려해 보수적으로.
 SECTION_MAX_CHARS = 2500

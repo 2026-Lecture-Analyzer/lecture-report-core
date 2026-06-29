@@ -182,12 +182,15 @@ def make_solar_generate_fn(backend: str = None, **kwargs):
     "google"  → make_google_generate_fn(**kwargs)
     "hf"      → load_solar() 후 make_generate_fn() (kwargs 무시, GPU 필요)
     """
+    from src.governor import govern        # 전역 호출 거버너(분당상한·총예산·동시성)
     backend = backend or config.MODEL_BACKEND
     if backend == "upstage":
-        return make_upstage_generate_fn(**kwargs)
-    if backend == "google":
-        return make_google_generate_fn(**kwargs)
-    if backend == "hf":
+        fn = make_upstage_generate_fn(**kwargs)
+    elif backend == "google":
+        fn = make_google_generate_fn(**kwargs)
+    elif backend == "hf":
         model, tokenizer = load_solar()
-        return make_generate_fn(model, tokenizer)
-    raise ValueError(f"알 수 없는 MODEL_BACKEND: {backend!r} (hf|upstage|google)")
+        fn = make_generate_fn(model, tokenizer)
+    else:
+        raise ValueError(f"알 수 없는 MODEL_BACKEND: {backend!r} (hf|upstage|google)")
+    return govern(fn)
