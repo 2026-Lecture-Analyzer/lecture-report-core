@@ -124,7 +124,7 @@ ANALYZE_MAX_EXPAND = 1       # 🟠 local 문맥확장 최대 횟수(needs_more 
 ANALYZE_GLOBAL_SAMPLE = 8    # 🔴 global 압축뷰에 넣을 샘플 청크 수
 ANALYZE_SELF_CONSISTENCY = 1 # 항목당 LLM 채점 반복수(>1=다수결, 비결정성·놓침 완화)
 ANALYZE_SC_TEMPERATURE = 0.4 # self-consistency 샘플 다양성용 온도(반복수>1일 때)
-PACE_CPM_LOW = 300           # 발화속도 적정 하한(분당 글자) — 잠정
+PACE_CPM_LOW = 550           # 발화속도 적정 하한(분당 글자) — ljs gold 보정(클라우드 ~480cpm=3)
 PACE_CPM_HIGH = 700          # 적정 상한 — 잠정
 # ── C2_review 복습 연계 cue (raw 기준) ─────────────────────────────────
 # holistic LLM 이 강의 곳곳에 흩어진 복습 신호를 체계적으로 놓쳐 1~2점만 줌(gold 대비 MAE 큼).
