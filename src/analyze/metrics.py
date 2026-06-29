@@ -91,6 +91,9 @@ def compute_metrics(blocks: list[dict], clean_text: str = "",
     check_per10 = check_cue_n / elapsed_min * 10
     engage_per10 = engage_cue_n / elapsed_min * 10
 
+    # C2_review 복습 연계 cue(raw 기준 — 강의당 총 횟수). holistic 이 흩어진 복습 신호를 놓침.
+    review_cue_n = sum(text.count(c) for c in config.REVIEW_CUES)
+
     return {
         "pace_cpm": round(pace_cpm, 1),
         "pace_wpm": round(pace_wpm, 1),
@@ -103,6 +106,7 @@ def compute_metrics(blocks: list[dict], clean_text: str = "",
         "incomplete_ratio_utt": incomplete_ratio_utt,
         "check_cue_n": check_cue_n,
         "engage_cue_n": engage_cue_n,
+        "review_cue_n": review_cue_n,
         "check_per10": round(check_per10, 2),
         "engage_per10": round(engage_per10, 2),
         "n_blocks": len(blocks),
@@ -140,6 +144,14 @@ def score_metric_item(item_key: str, metrics: dict) -> dict:
             score, note = 2, "다소 빠름(수강생 따라가기 부담 가능)"
         return {"score": score, "value": {"name": "pace_cpm", "value": cpm},
                 "comment": f"분당 {cpm}자 — {note} (잠정 기준 {lo}~{hi}, §2차 EDA 보정 예정)"}
+
+    if item_key == "C2_review":        # 전날 복습 연계 — 복습 cue 빈도(holistic 이 흩어진 신호 놓침)
+        n = metrics.get("review_cue_n", 0)
+        b1, b2, b3 = config.REVIEW_CUE_BANDS
+        score = 1 if n < b1 else 2 if n < b2 else 3 if n < b3 else 4
+        note = {1: "복습 신호 없음", 2: "미흡", 3: "보통", 4: "양호"}[score]
+        return {"score": score, "value": {"name": "review_cue_n", "value": n},
+                "comment": f"복습 연계 표현 {n}회 — {note} (지난 시간/앞에서/배웠던 등 raw 기준)"}
 
     if item_key == "C1_repetition":    # 불필요한 반복(필러·특정표현 과반복)
         rate = metrics.get("filler_rate", 0)

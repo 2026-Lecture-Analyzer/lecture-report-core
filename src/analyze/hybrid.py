@@ -25,7 +25,7 @@ from src.analyze.metrics import (compute_metrics, score_global_metric_item,
 
 # raw 메트릭으로 덮어쓸 결정적 항목 (나머지는 holistic 유지)
 # C1·pace = 정제본이 신호를 지우거나 무뎌지게 함(§8) → raw(merged.text) 기준 규칙 채점.
-METRIC_ITEMS = {"C1_repetition", "C1_completeness", "C1_consistency", "C4_pace"}
+METRIC_ITEMS = {"C1_repetition", "C1_completeness", "C1_consistency", "C4_pace", "C2_review"}
 
 # 근거(evidence) 분리: 점수는 holistic, 근거는 항목별 임베딩 태깅(⑤ eval_tags)에서 top-k.
 # holistic LLM 의 근거 선택이 약하고(엉뚱·중복·비결정적) → 항목별 검색 근거로 교체해
