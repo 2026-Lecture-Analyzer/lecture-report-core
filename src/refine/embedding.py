@@ -121,11 +121,14 @@ def make_embedder_fn(backend: str = None, **kwargs):
     "google"  → make_google_embed_fn(**kwargs)
     "kure"    → make_embed_fn(load_embedder()) (kwargs 무시, ~2GB 다운로드)
     """
+    from src.governor import govern        # 전역 호출 거버너(임베딩 API도 통과)
     backend = backend or config.EMBED_BACKEND
     if backend == "upstage":
-        return make_upstage_embed_fn(**kwargs)
-    if backend == "google":
-        return make_google_embed_fn(**kwargs)
-    if backend == "kure":
-        return make_embed_fn(load_embedder())
-    raise ValueError(f"알 수 없는 EMBED_BACKEND: {backend!r} (kure|upstage|google)")
+        fn = make_upstage_embed_fn(**kwargs)
+    elif backend == "google":
+        fn = make_google_embed_fn(**kwargs)
+    elif backend == "kure":
+        return make_embed_fn(load_embedder())     # 로컬 모델 — API 아님, 거버너 제외
+    else:
+        raise ValueError(f"알 수 없는 EMBED_BACKEND: {backend!r} (kure|upstage|google)")
+    return govern(fn)

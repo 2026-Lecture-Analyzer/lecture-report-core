@@ -7,8 +7,13 @@ from __future__ import annotations
 
 import contextlib
 import os
+import threading
 
 import streamlit as st
+
+# 키 주입은 os.environ·config 를 프로세스 전역으로 바꾸므로, 워커풀에서 동시 실행 시
+# 서로 덮어쓰지 않게 전역 락으로 직렬화한다(키 컨텍스트는 한 번에 하나만 활성).
+_APPLY_LOCK = threading.Lock()
 
 SS_KEY = "byok"
 
@@ -48,8 +53,13 @@ def key_form() -> None:
 
 @contextlib.contextmanager
 def applied(keys: dict):
-    """실행 동안만 키/백엔드를 env+config 에 주입, 종료 시 원복."""
+    """실행 동안만 키/백엔드를 env+config 에 주입, 종료 시 원복.
+
+    전역 락으로 직렬화 — 워커풀의 동시 job 들이 서로의 키/백엔드를 덮어쓰지 않게 보장.
+    (process-global 주입 방식의 안전장치. 진짜 병렬 멀티키 실행은 per-call 키 전달이 필요 — 향후.)
+    """
     from src import config
+    _APPLY_LOCK.acquire()
     saved_env = {k: os.environ.get(k) for k in ("UPSTAGE_API_KEY", "GOOGLE_API_KEY")}
     saved_cfg = (config.LLM_BACKEND, config.MODEL_BACKEND, config.EMBED_BACKEND)
     backend = keys["backend"]
@@ -67,3 +77,4 @@ def applied(keys: dict):
             else:
                 os.environ[k] = v
         config.LLM_BACKEND, config.MODEL_BACKEND, config.EMBED_BACKEND = saved_cfg
+        _APPLY_LOCK.release()
