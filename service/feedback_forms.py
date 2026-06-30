@@ -55,8 +55,26 @@ def items_by_cat() -> dict:
 
 
 def base_url() -> str:
-    """폼 공개 URL 베이스 — 배포 시 LECTURE_BASE_URL(예: https://도메인), 로컬 기본 localhost."""
-    return os.environ.get("LECTURE_BASE_URL", "http://localhost:8503").rstrip("/")
+    """폼 공개 URL 베이스.
+
+    우선순위: ① 환경변수 LECTURE_BASE_URL(예: https://도메인) ② 요청 헤더에서 자동 감지
+    (배포 시 Caddy/프록시가 넘기는 Host·X-Forwarded-Proto) ③ 로컬 기본 localhost.
+    배포에서 env 미설정이어도 실제 접속 도메인으로 폼 주소가 나오도록 헤더 기반 폴백을 둔다.
+    """
+    env = os.environ.get("LECTURE_BASE_URL")
+    if env:
+        return env.rstrip("/")
+    try:
+        import streamlit as st
+        h = st.context.headers or {}
+        host = h.get("Host") or h.get("host")
+        if host and "localhost" not in host and "127.0.0.1" not in host:
+            proto = (h.get("X-Forwarded-Proto") or h.get("x-forwarded-proto")
+                     or ("http" if host.startswith(("localhost", "127.")) else "https"))
+            return f"{proto}://{host}".rstrip("/")
+    except Exception:
+        pass
+    return "http://localhost:8503"
 
 
 def _index_path():
