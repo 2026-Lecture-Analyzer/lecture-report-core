@@ -78,6 +78,18 @@ GEN_MAX_NEW_TOKENS = 1024
 GEN_DO_SAMPLE = False
 SEED = 42
 
+# ── STT(Step -1, 음성/영상 → transcript txt) ───────────────────────────────
+# 녹화 파일(오디오/영상)을 Gemini 오디오 네이티브로 전사+화자분리해, 기존 파이프라인
+# 입력과 동일한 `<HH:MM:SS> 화자ID(hex): 텍스트` transcript txt 를 만든다(parse 그대로 재사용).
+STT_BACKEND = os.environ.get("STT_BACKEND", "google")  # 현재 google(Gemini)만 지원
+STT_MODEL = "gemini-2.5-flash"      # 오디오 이해 모델. 대안: gemini-2.5-pro(고품질·고가)
+STT_CHUNK_SEC = 600                 # 긴 강의를 이 길이(초)로 잘라 전사(토큰·정확도 안정). 0=통째
+STT_CHUNK_OVERLAP_SEC = 5           # 청크 경계에서 발화 잘림 방지용 겹침(초)
+STT_START_TIME = "09:00:00"         # transcript 타임스탬프 기준 월클럭(녹화 시작 시각). 세션분할·to_24h 호환
+STT_MAX_TOKENS = 8192               # 청크당 전사 출력 토큰 상한(10분 발화 여유)
+STT_AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg")
+STT_VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".webm", ".avi")
+
 # Step 4 정제: 인접 블록을 묶는 섹션 최대 글자 수(맥락 보존 단위).
 # Solar 4k 컨텍스트 + 용어집/이전요약/출력 여유를 고려해 보수적으로.
 SECTION_MAX_CHARS = 2500
@@ -124,8 +136,18 @@ ANALYZE_MAX_EXPAND = 1       # 🟠 local 문맥확장 최대 횟수(needs_more 
 ANALYZE_GLOBAL_SAMPLE = 8    # 🔴 global 압축뷰에 넣을 샘플 청크 수
 ANALYZE_SELF_CONSISTENCY = 1 # 항목당 LLM 채점 반복수(>1=다수결, 비결정성·놓침 완화)
 ANALYZE_SC_TEMPERATURE = 0.4 # self-consistency 샘플 다양성용 온도(반복수>1일 때)
-PACE_CPM_LOW = 300           # 발화속도 적정 하한(분당 글자) — 잠정
+PACE_CPM_LOW = 550           # 발화속도 적정 하한(분당 글자) — ljs gold 보정(클라우드 ~480cpm=3)
 PACE_CPM_HIGH = 700          # 적정 상한 — 잠정
+# ── C2_review 복습 연계 cue (raw 기준) ─────────────────────────────────
+# holistic LLM 이 강의 곳곳에 흩어진 복습 신호를 체계적으로 놓쳐 1~2점만 줌(gold 대비 MAE 큼).
+# 복습 표현은 distinctive 하고 gold 점수와 상관 → cue 카운팅(결정적)으로 직접 채점한다.
+REVIEW_CUES = [
+    "지난 시간", "지난주", "지난 주", "저번", "어제", "앞에서", "아까", "이전 시간",
+    "복습", "학기 초반", "초반에", "첫 번째 시간", "첫째 시간", "예전에", "배웠", "배운",
+    "나왔던", "다뤘던", "살펴봤", "했었", "설명드렸", "얘기했",
+]
+# 강의당 복습 cue 총 횟수 → 점수: 0=없음(1) · 1~2=미흡(2) · 3~5=보통(3) · 6+=양호(4)
+REVIEW_CUE_BANDS = (1, 3, 6)   # (미흡상한, 보통하한, 양호하한)
 # 필러율 기준 — gold(02-02) 보정: 실측 raw 필러율 ~5.7%가 사람 채점 '잦음(2점)'.
 # 0.15(15%)는 비현실적(실제 강의가 그 수준에 도달 안 함)이라 0.06으로 하향.
 FILLER_RATE_HIGH = 0.06
