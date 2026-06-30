@@ -61,6 +61,55 @@ def _build(rpt: Report):
     return sess, detail, keys, dates, smat
 
 
+def _report_pdf_bytes(rpt: Report):
+    """리포트 → PDF bytes + 파일명. 세션 1개면 PDF, 여러 개면 ZIP. 폰트 없으면 (None,None)."""
+    import io
+    import tempfile
+    import zipfile
+
+    from src.report.pdf import build_lecture_pdf, register_korean_font
+    from src.scoring.scoring import compute_scores
+
+    font = register_korean_font()
+    if not font:
+        return None, None
+    rows = rpt.load_score_rows()
+    scores = compute_scores(rows)
+    lids = list(scores["lectures"])
+    if not lids:
+        return None, None
+    with tempfile.TemporaryDirectory() as td:
+        paths = []
+        for lid in lids:
+            p = Path(td) / f"report_{lid}.pdf"
+            build_lecture_pdf(lid, scores, rows, p, font)
+            paths.append(p)
+        if len(paths) == 1:
+            return paths[0].read_bytes(), f"{rpt.name}_{lids[0]}.pdf"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for p in paths:
+                z.write(p, p.name)
+        return buf.getvalue(), f"{rpt.name}_리포트({len(paths)}건).zip"
+
+
+def _pdf_download_ui(rpt: Report) -> None:
+    """리포트 PDF 생성·다운로드 (헤더 영역). 생성 결과는 세션상태에 캐싱."""
+    with st.expander("📄 리포트 PDF 저장"):
+        if st.button("PDF 생성", key=f"genpdf_{rpt.report_id}"):
+            with st.spinner("PDF 생성 중…"):
+                data, fn = _report_pdf_bytes(rpt)
+            st.session_state[f"pdf_{rpt.report_id}"] = (data, fn)
+            if not data:
+                st.warning("한글 폰트를 찾지 못해 PDF를 만들 수 없어요(AppleGothic/NanumGothic 필요).")
+        blob = st.session_state.get(f"pdf_{rpt.report_id}")
+        if blob and blob[0]:
+            data, fn = blob
+            mime = "application/zip" if fn.endswith(".zip") else "application/pdf"
+            st.download_button("⬇️ 다운로드", data, file_name=fn, mime=mime,
+                               key=f"dlpdf_{rpt.report_id}")
+
+
 def render_report(rpt: Report) -> None:
     sess, detail, keys, dates, smat = _build(rpt)
     if not keys:
@@ -80,6 +129,8 @@ def render_report(rpt: Report) -> None:
     if rpt.meta.get("instructor"):
         cap = f"강사 {rpt.meta['instructor']} · " + cap
     st.caption(cap + f" · 모드: {'오전/오후 분리' if is_ampm else '단일 강사'}")
+
+    _pdf_download_ui(rpt)
 
     cols = st.columns(4)
     cols[0].metric("전체 종합", round(mean(ovs), 2) if ovs else "—")
