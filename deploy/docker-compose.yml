@@ -9,6 +9,8 @@ services:
     environment:
       LECTURE_DATA_DIR: /data/workspaces
       LECTURE_QUOTA_MB: "200"
+      # 설문폼 공개 주소 베이스(미설정 시 헤더 자동감지, 그래도 안 되면 localhost 폴백)
+      LECTURE_BASE_URL: https://lectureanalzer.yeseulkim.cloud
     volumes:
       - lecture-data:/data                       # 워크스페이스 보고서 영속
       - ../.streamlit/secrets.toml:/app/.streamlit/secrets.toml:ro  # 구글 OIDC

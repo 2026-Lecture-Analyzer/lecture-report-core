@@ -267,7 +267,7 @@ if mode.startswith("📂"):
         if tok:
             st.code(tok, language=None)
             st.caption("또는 링크로:")
-            st.code(f"https://lectureAnalzer.yeseulkim.cloud/?invite={tok}", language=None)
+            st.code(f"https://lectureanalzer.yeseulkim.cloud/?invite={tok}", language=None)
 
 # ══════════════════════════════════════════════════════════════════════
 # 분석 추가
