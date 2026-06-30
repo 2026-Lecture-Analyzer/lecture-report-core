@@ -21,6 +21,69 @@ NLP 과제 1 · 4인 1팀 · 4주 프로젝트. 본 저장소(core)는 분석 �
 
 ---
 
+## 시스템 아키텍처
+
+AWS 소형 인스턴스 1대 위에 Docker Compose로 리버스 프록시(Caddy)와 앱(Streamlit)을 띄우고,
+분석 시 사용자 키(BYO)로 외부 LLM(Upstage Solar · Google Gemini)을 호출하는 구조다.
+
+![아키텍처다이어그램](docs/images/아키텍처.png)
+
+```mermaid
+flowchart TB
+    User["사용자 브라우저"]
+
+    subgraph AWS["AWS 인스턴스 · Lightsail 2GB 또는 EC2 t4g.small · ARM·Ubuntu·고정IP"]
+      subgraph DC["Docker Compose"]
+        Caddy["caddy 컨테이너<br/>:80 · :443 · 자동 HTTPS<br/>reverse_proxy → app:8503"]
+        subgraph APP["app 컨테이너 · python 3.13-slim + JDK"]
+          ST["Streamlit :8503 · 멀티테넌트 SaaS"]
+          AUTH["auth · 구글 OAuth · dev 로그인"]
+          WSM["workspace · 격리 · 초대 · 쿼터 200MB"]
+          JOBS["jobs · 작업큐 + 워커풀<br/>(키 전역락으로 분석 직렬화)"]
+          GOV["governor · LLM 분당상한·예산·동시성 캡"]
+          subgraph PIPE["분석 파이프라인 · 격리 작업폴더"]
+            P1["① 전처리 parse·merge (규칙)"]
+            P2["③④⑤ 정제·청킹·태깅"]
+            P3["⑥ 하이브리드 분석<br/>정량 4 + holistic 14"]
+            P4["⑦ 스코어링"]
+          end
+          RV["report_view · 대시보드 · PDF(ReportLab)"]
+        end
+      end
+      VOL[("lecture-data 볼륨 → /data<br/>워크스페이스 보고서 영속")]
+      SEC[(".streamlit/secrets.toml<br/>구글 OIDC")]
+    end
+
+    subgraph EXT["외부 API · 사용자 BYO 키 · 세션에만 보관"]
+      SOLAR["Upstage Solar<br/>정제 · 분석"]
+      GEM["Google Gemini<br/>음성/영상 STT"]
+      GOA["Google OAuth"]
+    end
+
+    User -->|HTTPS| Caddy --> ST
+    ST --> AUTH --> GOA
+    ST --> WSM --> VOL
+    ST --> RV --> VOL
+    ST -->|업로드| JOBS --> PIPE
+    JOBS -->|음성 입력| GEM
+    P2 --> SOLAR
+    P3 --> GOV --> SOLAR
+    P4 --> RV
+    AUTH -.-> SEC
+```
+
+| 구분 | 구성 |
+|---|---|
+| 컴퓨트 | AWS Lightsail 2GB 또는 EC2 t4g.small (ARM, Ubuntu) · 고정 IP |
+| 컨테이너 | Docker Compose 2개 — `app`(Streamlit, python:3.13-slim + JDK, `:8503`) + `caddy`(`:80`/`:443`) |
+| 프록시·TLS | Caddy 자동 HTTPS(Let's Encrypt) · `reverse_proxy app:8503` · websocket 지원 |
+| 도메인 | `lectureanalzer.yeseulkim.cloud` (A레코드 → 인스턴스 공인 IP) |
+| 스토리지 | `lecture-data` 볼륨 → `/data` (워크스페이스 보고서 영속) · 워크스페이스당 쿼터 200MB |
+| 시크릿 | `.streamlit/secrets.toml`(구글 OIDC) 마운트 · 사용자 API 키는 세션 메모리에만 |
+| 외부 API | Upstage Solar(정제·분석), Google Gemini(음성 STT) — 사용자 BYO 키로 호출 |
+
+---
+
 ## 주요 기능
 
 | 기능 | 설명 |
