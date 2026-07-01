@@ -1,6 +1,7 @@
 # Caddy — 도메인 + 자동 HTTPS(Let's Encrypt) + Streamlit 리버스프록시.
-# DNS: lectureanalzer.yeseulkim.cloud 의 A레코드를 이 인스턴스 공인 IP로.
-lectureanalzer.yeseulkim.cloud {
+# 도메인은 브랜치(=인스턴스)별로 다름 → compose 가 넘겨주는 $DOMAIN 환경변수로 치환.
+# DNS: $DOMAIN 의 A레코드를 해당 인스턴스 공인 IP로.
+{$DOMAIN} {
 	encode zstd gzip
 	# Streamlit 은 websocket 사용 — Caddy reverse_proxy 가 자동 업그레이드 처리
 	reverse_proxy app:8503
