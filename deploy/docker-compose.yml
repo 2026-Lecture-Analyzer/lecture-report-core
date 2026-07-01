@@ -1,5 +1,6 @@
 # 소형 인스턴스 1대 배포 — app(Streamlit) + caddy(TLS·도메인).
-# 사용: cd core && docker compose -f deploy/docker-compose.yml up -d --build
+# 사용: cd core && echo "DOMAIN=내도메인" > .env && \
+#       docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 services:
   app:
     build:
@@ -9,6 +10,8 @@ services:
     environment:
       LECTURE_DATA_DIR: /data/workspaces
       LECTURE_QUOTA_MB: "200"
+      # 설문폼 공개 주소 베이스 — 브랜치(=인스턴스)별 도메인. .env 의 DOMAIN 필수.
+      LECTURE_BASE_URL: https://${DOMAIN:?set DOMAIN in .env}
     volumes:
       - lecture-data:/data                       # 워크스페이스 보고서 영속
       - ../.streamlit/secrets.toml:/app/.streamlit/secrets.toml:ro  # 구글 OIDC
@@ -18,6 +21,8 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}   # Caddyfile 의 {$DOMAIN} 치환용
     ports:
       - "80:80"
       - "443:443"
