@@ -1,16 +1,16 @@
 name: deploy
 
-# 브랜치별 배포 — 각 브랜치가 자기 GitHub Environment(같은 이름)의 secret 을 써서
+# 브랜치별 배포 — deploy/<이름> 브랜치만 배포된다. main 은 공용 코드일 뿐 배포 안 함.
+# 각 deploy/<이름> 브랜치는 같은 이름의 GitHub Environment 의 secret/변수를 써서
 # 서로 다른 인스턴스·도메인으로 배포된다.
-#   - main        → Environment "main"        (예슬 prod)
+#   - deploy/kys   → Environment "deploy/kys"   (예슬)
 #   - deploy/<이름> → Environment "deploy/<이름>" (팀원별 포폴 인스턴스)
-# 새 팀원 추가: (1) 인스턴스 준비 → (2) deploy/<이름> 브랜치 생성 →
-#   (3) 같은 이름 Environment 만들고 아래 secret/변수 등록 → (4) 그 브랜치에 push.
-# 수동 실행도 가능(Actions 탭 → Run workflow → 브랜치 선택).
+# 새 팀원 추가: (1) 인스턴스 준비(init-server.sh) → (2) deploy/<이름> 브랜치 생성 →
+#   (3) 같은 이름 Environment 만들고 secret/변수 등록 → (4) 그 브랜치에 push.
+# 수동 실행도 가능(Actions 탭 → Run workflow → deploy/* 브랜치 선택).
 on:
   push:
     branches:
-      - main
       - "deploy/**"
   workflow_dispatch:
 
