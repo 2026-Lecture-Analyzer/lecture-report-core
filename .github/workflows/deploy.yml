@@ -75,8 +75,8 @@ jobs:
              # 빌드(requirements 안 바뀌면 pip 레이어 캐시 재사용 → 빠름) & 기동.
              # --env-file .env 로 DOMAIN 주입(compose 변수 치환 + caddy 환경변수).
              # 볼륨(lecture-data·caddy-data)은 그대로 → 사용자 보고서·인증서 유지.
-             docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
-             docker compose --env-file .env -f deploy/docker-compose.yml ps
+             docker-compose --env-file .env -f deploy/docker-compose.yml up -d --build
+             docker-compose --env-file .env -f deploy/docker-compose.yml ps
              # 쓰레기 정리: 떨어져나간 옛 이미지(dangling)만 삭제. 볼륨·사용중 이미지·빌드캐시는 보존.
              docker image prune -f || true
              # 빌드캐시는 살리되 3GB 초과분만 정리(디스크 폭주 방지, 다음 빌드 속도 유지).
